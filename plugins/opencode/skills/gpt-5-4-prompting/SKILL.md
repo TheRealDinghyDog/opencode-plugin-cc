@@ -1,20 +1,20 @@
 ---
 name: gpt-5-4-prompting
-description: Internal guidance for composing OpenCode and GPT-5.4 prompts for coding, review, diagnosis, and research tasks inside the OpenCode Claude Code plugin
+description: Internal guidance for composing provider-neutral OpenCode prompts for coding, review, diagnosis, and research tasks inside the OpenCode Claude Code plugin
 user-invocable: false
 ---
 
-# GPT-5.4 Prompting
+# OpenCode Prompting
 
-Use this skill when `opencode:opencode-rescue` needs to ask OpenCode or another GPT-5.4-based workflow for help.
+Use this skill when `opencode:opencode-rescue` needs to tighten a user request before delegating it to OpenCode.
 
-Prompt OpenCode like an operator, not a collaborator. Keep prompts compact and block-structured with XML tags. State the task, the output contract, the follow-through defaults, and the small set of extra constraints that matter.
+Prompt OpenCode like an operator, not a collaborator. Keep prompts compact and block-structured with XML tags. State the task, the output contract, the follow-through defaults, and the small set of extra constraints that matter. Do not assume a specific provider or model family; the prompt should work across OpenCode's configured model unless the user explicitly selected one.
 
 Core rules:
 - Prefer one clear task per OpenCode run. Split unrelated asks into separate runs.
 - Tell OpenCode what done looks like. Do not assume it will infer the desired end state.
 - Add explicit grounding and verification rules for any task where unsupported guesses would hurt quality.
-- Prefer better prompt contracts over raising reasoning or adding long natural-language explanations.
+- Prefer better prompt contracts over model-specific tuning or long natural-language explanations.
 - Use XML tags consistently so the prompt has stable internal structure.
 
 Default prompt recipe:
@@ -38,7 +38,7 @@ How to choose prompt shape:
 Working rules:
 - Prefer explicit prompt contracts over vague nudges.
 - Use stable XML tag names that match the block names from the reference file.
-- Do not raise reasoning or complexity first. Tighten the prompt and verification rules before escalating.
+- Do not escalate model, variant, or complexity first. Tighten the prompt and verification rules before changing runtime settings.
 - Ask OpenCode for brief, outcome-based progress updates only when the task is long-running or tool-heavy.
 - Keep claims anchored to observed evidence. If something is a hypothesis, say so.
 
@@ -50,5 +50,5 @@ Prompt assembly checklist:
 5. Remove redundant instructions before sending the prompt.
 
 Reusable blocks live in [references/prompt-blocks.md](references/prompt-blocks.md).
-Concrete end-to-end templates live in [references/codex-prompt-recipes.md](references/codex-prompt-recipes.md).
-Common failure modes to avoid live in [references/codex-prompt-antipatterns.md](references/codex-prompt-antipatterns.md).
+Concrete end-to-end templates live in [references/opencode-prompt-recipes.md](references/opencode-prompt-recipes.md).
+Common failure modes to avoid live in [references/opencode-prompt-antipatterns.md](references/opencode-prompt-antipatterns.md).

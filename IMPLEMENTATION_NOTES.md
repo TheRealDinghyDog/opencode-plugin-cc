@@ -27,9 +27,15 @@ The first pass shipped unrun (the build sandbox couldn't bind 127.0.0.1). Runnin
 - `npm test` — 30/30 green. ✓
 - Codex read-only review of the fixes: all 7 confirmed correct; LOW findings (title/model guards, fixture schema enforcement) applied.
 
-## Deferred to Phase 2
-- **`ensureServer` has no inter-process lock** — concurrent plugin commands could spawn duplicate `opencode serve` processes and orphan one. Needs a lock file (or single-flight) around load/spawn/save. LOW (commands rarely overlap; tests run sequentially).
-- **`transfer`** — still stubbed (`OpenCode transfer is not implemented in Phase 1`). Phase 3: replay a Claude JSONL transcript into an OpenCode session via `noReply`.
-- **Background cancel** — `interruptServerTurn` may connect to a different server instance than the one running a backgrounded job's turn; the abort may not land.
+## Phase 2 — command surface + hardening (done)
+Delegated to Codex, then a two-way review round (Claude reviewed Codex; Codex reviewed the result), then Codex's findings fixed. `npm test` 32/32.
+- **`/opencode:review` structured output** — OpenCode returns `json_schema` output as a synthetic `StructuredOutput` tool part (`state.input`), not text; captured it (was returning unparseable prose). Regression test added.
+- **`ensureServer` inter-process lock** — atomic `mkdirSync` lock with token-matched release, double-checked healthy-session read, and dead-PID/age stale detection. Codex's review found 3 real bugs, now fixed: stale-takeover TOCTOU → atomic single-winner rename-steal; leaked lock on owner-file write failure → cleanup-on-failure; age note. Race-safe boot-marker test (serverStarts counter was itself racy).
+- **Targeted cancel** — per-job `serverUrl` recorded so cancel aborts the exact server that ran the turn (fallback to `ensureServer`).
+- **Prompting skill** — `gpt-5-4-prompting` generalized to be provider-neutral; `codex-prompt-*.md` → `opencode-prompt-*.md`.
+- **Housekeeping** — dropped unused `typescript` devDep; `.codex/` gitignored; removed stale CI `npm run build`.
+
+## Deferred to Phase 3
+- **`transfer`** — still stubbed (`OpenCode transfer is not implemented in Phase 1`). Replay a Claude JSONL transcript into an OpenCode session via `noReply`.
 - **Review sessions persist** — read-only review sessions are not deleted; acceptable, or delete for ephemeral parity.
-- **Housekeeping** — `typescript` devDep is now unused (build step removed); add `.codex/` to `.gitignore` (local Codex-subagent config, not part of the plugin).
+- **Optional** — regenerate TypeScript types from OpenCode's OpenAPI (`GET /doc`) to restore a type-check build.

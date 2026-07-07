@@ -18,6 +18,15 @@ export function readFakeState(binDir) {
   return fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : null;
 }
 
+export function readServerBootCount(binDir) {
+  const bootsDir = path.join(binDir, "boots");
+  try {
+    return fs.readdirSync(bootsDir).length;
+  } catch {
+    return 0;
+  }
+}
+
 export function installFakeOpencode(binDir) {
   const statePath = path.join(binDir, "fake-opencode-state.json");
   const scriptPath = path.join(binDir, "opencode");
@@ -90,6 +99,64 @@ function textFromMessage(body) {
     .trim();
 }
 
+function schemaType(schema) {
+  const type = schema && schema.type;
+  return Array.isArray(type) ? type[0] : type;
+}
+
+function exampleString(key) {
+  return key ? key.replace(/_/g, " ") + " value" : "structured value";
+}
+
+function exampleForSchema(schema, key) {
+  if (!schema || typeof schema !== "object") {
+    return exampleString(key);
+  }
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
+    return schema.enum[0];
+  }
+
+  const type = schemaType(schema);
+  if (type === "object" || schema.properties) {
+    const properties = schema.properties || {};
+    const required = Array.isArray(schema.required) ? schema.required : Object.keys(properties).slice(0, 1);
+    const result = {};
+    for (const property of required) {
+      result[property] = exampleForSchema(properties[property], property);
+    }
+    return result;
+  }
+  if (type === "array") {
+    return [];
+  }
+  if (type === "integer") {
+    return Number.isFinite(schema.minimum) ? schema.minimum : 1;
+  }
+  if (type === "number") {
+    return Number.isFinite(schema.minimum) ? schema.minimum : 1;
+  }
+  if (type === "boolean") {
+    return true;
+  }
+  return exampleString(key);
+}
+
+function structuredOutputParts(body) {
+  if (body && body.format && body.format.type === "json_schema") {
+    return [
+      {
+        type: "tool",
+        tool: "StructuredOutput",
+        state: {
+          status: "completed",
+          input: exampleForSchema(body.format.schema, "result")
+        }
+      }
+    ];
+  }
+  return null;
+}
+
 async function waitForPermission(permissionID) {
   await new Promise((resolve) => {
     const timeout = setTimeout(resolve, 2000);
@@ -126,7 +193,10 @@ async function handleMessage(req, res, sessionID) {
   const finalText = prompt.includes("follow up")
     ? "Resumed the prior OpenCode run.\\nFollow-up prompt accepted."
     : "Handled the requested task.\\nTask prompt accepted.";
-  const parts = [{ type: "text", text: finalText }];
+  const parts = structuredOutputParts(body) || [{ type: "text", text: finalText }];
+  const finalState = loadState();
+  finalState.lastResponseParts = parts;
+  saveState(finalState);
   emit({ type: "message.updated", sessionID, message: { id: messageID, parts } });
   emit({ type: "session.idle", sessionID });
   sendJson(res, { info: { id: messageID, sessionID }, parts });
@@ -161,11 +231,25 @@ const port = Number(args[args.indexOf("--port") + 1] || 0);
 const bootState = loadState();
 bootState.serverStarts = (bootState.serverStarts || 0) + 1;
 saveState(bootState);
+// Race-safe boot marker: each process writes a uniquely-named file, so counting
+// files reliably reflects concurrent boots (unlike serverStarts' read-modify-
+// write, where two concurrent boots can both persist the same incremented value).
+try {
+  const bootsDir = path.join(path.dirname(STATE_PATH), "boots");
+  fs.mkdirSync(bootsDir, { recursive: true });
+  fs.writeFileSync(path.join(bootsDir, process.pid + "-" + process.hrtime.bigint().toString()), "");
+} catch {}
+const bootStartedAt = Date.now();
+const healthDelayMs = Math.max(0, Number(process.env.FAKE_OPENCODE_HEALTH_DELAY_MS || 0));
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
 
   if (req.method === "GET" && url.pathname === "/global/health") {
+    if (Date.now() - bootStartedAt < healthDelayMs) {
+      sendJson(res, { ok: false }, 503);
+      return;
+    }
     sendJson(res, { ok: true });
     return;
   }

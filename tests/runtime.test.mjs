@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { buildEnv, installFakeOpencode, readFakeState } from "./fake-opencode-fixture.mjs";
+import { buildEnv, installFakeOpencode, readFakeState, readServerBootCount } from "./fake-opencode-fixture.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -47,6 +48,30 @@ function cleanupServer(cwd, env) {
     cwd,
     env,
     input: JSON.stringify({ cwd, session_id: env.OPENCODE_COMPANION_SESSION_ID ?? "sess-current" })
+  });
+}
+
+function runAsync(command, args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      windowsHide: true
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("close", (status) => {
+      resolve({ status, stdout, stderr });
+    });
   });
 }
 
@@ -186,6 +211,73 @@ test("commands reuse one shared opencode serve within the same plugin state", { 
     const fakeState = readFakeState(binDir);
     assert.equal(fakeState.serverStarts, 1);
     assert.equal(fakeState.sessions.length, 2);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("concurrent commands share one opencode serve startup", { skip: LOCAL_LISTEN_SKIP }, async () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  const env = buildTestEnv(binDir, {
+    FAKE_OPENCODE_HEALTH_DELAY_MS: "250"
+  });
+
+  try {
+    const [first, second] = await Promise.all([
+      runAsync("node", [SCRIPT, "task", "--json", "first concurrent task"], { cwd: repo, env }),
+      runAsync("node", [SCRIPT, "task", "--json", "second concurrent task"], { cwd: repo, env })
+    ]);
+
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(second.status, 0, second.stderr);
+
+    // serverStarts is a racy read-modify-write; the boot-marker count is
+    // race-safe and reliably fails if the lock let a second server start.
+    assert.equal(readServerBootCount(binDir), 1);
+    const fakeState = readFakeState(binDir);
+    assert.equal(fakeState.sessions.length, 2);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("review captures json_schema output from StructuredOutput tool input", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "before\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "README.md"), "after\n");
+  const env = buildTestEnv(binDir);
+
+  try {
+    const result = run("node", [SCRIPT, "review", "--json"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    const expected = {
+      verdict: "approve",
+      summary: "summary value",
+      findings: [],
+      next_steps: []
+    };
+    assert.equal(payload.parseError, null);
+    assert.deepEqual(payload.result, expected);
+    assert.equal(payload.opencode.stdout, JSON.stringify(expected));
+
+    const fakeState = readFakeState(binDir);
+    assert.equal(fakeState.lastResponseParts.length, 1);
+    assert.equal(fakeState.lastResponseParts[0].type, "tool");
+    assert.equal(fakeState.lastResponseParts[0].tool, "StructuredOutput");
+    assert.equal(fakeState.lastResponseParts[0].text, undefined);
   } finally {
     cleanupServer(repo, env);
   }

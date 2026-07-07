@@ -1,6 +1,6 @@
 # OpenCode Prompt Anti-Patterns
 
-Avoid these when prompting OpenCode or GPT-5.4.
+Avoid these when prompting OpenCode.
 
 ## Vague task framing
 

@@ -16,6 +16,7 @@ function normalizeProgressEvent(value) {
       phase: typeof value.phase === "string" && value.phase.trim() ? value.phase.trim() : null,
       threadId: typeof value.threadId === "string" && value.threadId.trim() ? value.threadId.trim() : null,
       turnId: typeof value.turnId === "string" && value.turnId.trim() ? value.turnId.trim() : null,
+      serverUrl: typeof value.serverUrl === "string" && value.serverUrl.trim() ? value.serverUrl.trim() : null,
       stderrMessage: value.stderrMessage == null ? null : String(value.stderrMessage).trim(),
       logTitle: typeof value.logTitle === "string" && value.logTitle.trim() ? value.logTitle.trim() : null,
       logBody: value.logBody == null ? null : String(value.logBody).trimEnd()
@@ -27,6 +28,7 @@ function normalizeProgressEvent(value) {
     phase: null,
     threadId: null,
     turnId: null,
+    serverUrl: null,
     stderrMessage: String(value ?? "").trim(),
     logTitle: null,
     logBody: null
@@ -71,6 +73,7 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
   let lastPhase = null;
   let lastThreadId = null;
   let lastTurnId = null;
+  let lastServerUrl = null;
 
   return (event) => {
     const normalized = normalizeProgressEvent(event);
@@ -92,6 +95,12 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
     if (normalized.turnId && normalized.turnId !== lastTurnId) {
       lastTurnId = normalized.turnId;
       patch.turnId = normalized.turnId;
+      changed = true;
+    }
+
+    if (normalized.serverUrl && normalized.serverUrl !== lastServerUrl) {
+      lastServerUrl = normalized.serverUrl;
+      patch.serverUrl = normalized.serverUrl;
       changed = true;
     }
 
@@ -146,7 +155,8 @@ export async function runTrackedJob(job, runner, options = {}) {
     startedAt: nowIso(),
     phase: "starting",
     pid: process.pid,
-    logFile: options.logFile ?? job.logFile ?? null
+    logFile: options.logFile ?? job.logFile ?? null,
+    serverUrl: options.serverUrl ?? job.serverUrl ?? null
   };
   writeJobFile(job.workspaceRoot, job.id, runningRecord);
   upsertJob(job.workspaceRoot, runningRecord);
@@ -160,6 +170,7 @@ export async function runTrackedJob(job, runner, options = {}) {
       status: completionStatus,
       threadId: execution.threadId ?? null,
       turnId: execution.turnId ?? null,
+      serverUrl: execution.serverUrl ?? runningRecord.serverUrl ?? null,
       pid: null,
       phase: completionStatus === "completed" ? "done" : "failed",
       completedAt,
@@ -171,6 +182,7 @@ export async function runTrackedJob(job, runner, options = {}) {
       status: completionStatus,
       threadId: execution.threadId ?? null,
       turnId: execution.turnId ?? null,
+      serverUrl: execution.serverUrl ?? runningRecord.serverUrl ?? null,
       summary: execution.summary,
       phase: completionStatus === "completed" ? "done" : "failed",
       pid: null,

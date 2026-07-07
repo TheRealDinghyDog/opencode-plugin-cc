@@ -377,7 +377,8 @@ async function executeReviewRun(request) {
     summary: parsed.parsed?.summary ?? parsed.parseError ?? firstMeaningfulLine(result.finalMessage, `${reviewName} finished.`),
     jobTitle: `OpenCode ${reviewName}`,
     jobClass: "review",
-    targetLabel: context.target.label
+    targetLabel: context.target.label,
+    serverUrl: result.serverUrl ?? null
   };
 }
 
@@ -450,7 +451,8 @@ async function executeTaskRun(request) {
     summary: firstMeaningfulLine(rawOutput, firstMeaningfulLine(failureMessage, `${taskMetadata.title} finished.`)),
     jobTitle: taskMetadata.title,
     jobClass: "task",
-    write: Boolean(request.write)
+    write: Boolean(request.write),
+    serverUrl: result.serverUrl ?? null
   };
 }
 
@@ -713,7 +715,11 @@ async function handleTask(argv) {
     ensureOpenCodeAvailable(cwd);
     requireTaskRequest(prompt, resumeLast);
 
-    const job = buildTaskJob(workspaceRoot, taskMetadata, write);
+    const currentServerUrl = getSessionRuntimeStatus(process.env, workspaceRoot).url ?? null;
+    const job = {
+      ...buildTaskJob(workspaceRoot, taskMetadata, write),
+      ...(currentServerUrl ? { serverUrl: currentServerUrl } : {})
+    };
     const request = buildTaskRequest({
       cwd,
       model,
@@ -896,8 +902,9 @@ async function handleCancel(argv) {
   const existing = readStoredJob(workspaceRoot, job.id) ?? {};
   const threadId = existing.threadId ?? job.threadId ?? null;
   const turnId = existing.turnId ?? job.turnId ?? null;
+  const serverUrl = existing.serverUrl ?? job.serverUrl ?? null;
 
-  const interrupt = await interruptServerTurn(cwd, { threadId, turnId });
+  const interrupt = await interruptServerTurn(cwd, { threadId, turnId, serverUrl });
   if (interrupt.attempted) {
     appendLogLine(
       job.logFile,

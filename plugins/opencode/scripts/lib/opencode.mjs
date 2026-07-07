@@ -623,6 +623,17 @@ async function withServer(cwd, fn) {
   return fn(new OpencodeServerClient(server.url), server);
 }
 
+async function abortSessionAtUrl(serverUrl, threadId, timeoutMs = 1000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const client = new OpencodeServerClient(serverUrl);
+    await client.abort(threadId, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function getSessionsArray(response) {
   if (Array.isArray(response)) {
     return response;
@@ -746,7 +757,7 @@ export async function getAuthStatus(cwd) {
   }
 }
 
-export async function interruptServerTurn(cwd, { threadId }) {
+export async function interruptServerTurn(cwd, { threadId, serverUrl = null }) {
   if (!threadId) {
     return {
       attempted: false,
@@ -754,6 +765,27 @@ export async function interruptServerTurn(cwd, { threadId }) {
       transport: null,
       detail: "missing OpenCode session id"
     };
+  }
+
+  if (serverUrl) {
+    try {
+      await abortSessionAtUrl(serverUrl, threadId);
+      return {
+        attempted: true,
+        interrupted: true,
+        transport: "server",
+        detail: `Aborted OpenCode session ${threadId}.`,
+        serverUrl
+      };
+    } catch (error) {
+      return {
+        attempted: true,
+        interrupted: false,
+        transport: "server",
+        detail: error instanceof Error ? error.message : String(error),
+        serverUrl
+      };
+    }
   }
 
   const availability = getAvailability(cwd);
@@ -800,15 +832,22 @@ export async function runServerTurn(cwd, options = {}) {
     throw new Error("A prompt is required for this OpenCode run.");
   }
 
-  return withServer(cwd, async (client) => {
+  return withServer(cwd, async (client, server) => {
+    emitProgress(options.onProgress, "Using shared OpenCode server.", "starting", {
+      serverUrl: server.url
+    });
+
     let sessionID = options.resumeThreadId ?? options.resumeSessionId ?? null;
 
     if (sessionID) {
       emitProgress(options.onProgress, `Resuming OpenCode session ${sessionID}.`, "starting", {
-        threadId: sessionID
+        threadId: sessionID,
+        serverUrl: server.url
       });
     } else {
-      emitProgress(options.onProgress, "Starting OpenCode task session.", "starting");
+      emitProgress(options.onProgress, "Starting OpenCode task session.", "starting", {
+        serverUrl: server.url
+      });
       const session = await client.createSession(
         buildCreateSessionParams(cwd, {
           title: options.threadName ?? options.title ?? (options.persistThread ? buildTaskSessionName(prompt) : null),
@@ -822,7 +861,8 @@ export async function runServerTurn(cwd, options = {}) {
         throw new Error("OpenCode did not return a session id.");
       }
       emitProgress(options.onProgress, `Session ready (${sessionID}).`, "starting", {
-        threadId: sessionID
+        threadId: sessionID,
+        serverUrl: server.url
       });
     }
 
@@ -858,6 +898,7 @@ export async function runServerTurn(cwd, options = {}) {
       status: turnState.error ? 1 : 0,
       threadId: sessionID,
       turnId: turnState.messageID,
+      serverUrl: server.url,
       finalMessage,
       structuredOutput: structured ?? null,
       reasoningSummary: turnState.reasoningSummary,
