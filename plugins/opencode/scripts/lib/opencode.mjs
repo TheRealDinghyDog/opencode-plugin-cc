@@ -271,6 +271,24 @@ function extractReasoningFromParts(parts) {
     .filter(Boolean);
 }
 
+function extractStructuredOutput(parts) {
+  // OpenCode returns json_schema output as a synthetic "StructuredOutput" tool
+  // call whose completed `state.input` is the schema-conforming object — there
+  // is no text part, so text-based capture misses it entirely.
+  for (const part of parts) {
+    if (part && part.type === "tool" && part.tool === "StructuredOutput") {
+      const toolState = part.state ?? {};
+      if (toolState.status && toolState.status !== "completed") {
+        continue;
+      }
+      if (toolState.input !== undefined) {
+        return toolState.input;
+      }
+    }
+  }
+  return undefined;
+}
+
 function extractFilePath(event) {
   return (
     event?.path ??
@@ -314,6 +332,7 @@ function createTurnCaptureState(sessionID, options = {}) {
     resolveCompletion,
     rejectCompletion,
     finalMessage: "",
+    structuredOutput: null,
     reasoningSummary: [],
     touchedFiles: new Set(),
     commandExecutions: [],
@@ -395,6 +414,12 @@ function scheduleResponseFallbackCompletion(state) {
 function applyMessageParts(state, parts, sessionID) {
   if (!Array.isArray(parts) || parts.length === 0) {
     return;
+  }
+  if (!sessionID || sessionID === state.sessionID) {
+    const structured = extractStructuredOutput(parts);
+    if (structured !== undefined) {
+      state.structuredOutput = structured;
+    }
   }
   const text = extractTextFromParts(parts);
   const reasoning = extractReasoningFromParts(parts);
@@ -821,11 +846,20 @@ export async function runServerTurn(cwd, options = {}) {
       }
     );
 
+    const structured = turnState.structuredOutput;
+    const finalMessage =
+      options.outputSchema && structured !== null && structured !== undefined
+        ? typeof structured === "string"
+          ? structured
+          : JSON.stringify(structured)
+        : turnState.finalMessage;
+
     return {
       status: turnState.error ? 1 : 0,
       threadId: sessionID,
       turnId: turnState.messageID,
-      finalMessage: turnState.finalMessage,
+      finalMessage,
+      structuredOutput: structured ?? null,
       reasoningSummary: turnState.reasoningSummary,
       turn: {
         id: turnState.messageID ?? "opencode-message",

@@ -400,7 +400,7 @@ export function renderStoredJobResult(job, storedJob) {
 
   const rawOutput =
     (typeof storedJob?.result?.rawOutput === "string" && storedJob.result.rawOutput) ||
-    (typeof storedJob?.result?.codex?.stdout === "string" && storedJob.result.codex.stdout) ||
+    (typeof storedJob?.result?.opencode?.stdout === "string" && storedJob.result.opencode.stdout) ||
     "";
   if (rawOutput) {
     const output = rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
