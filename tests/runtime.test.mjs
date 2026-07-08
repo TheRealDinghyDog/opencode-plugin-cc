@@ -371,7 +371,9 @@ test("task fails when completion has no recoverable current-turn message (issue 
         sessions: [
           {
             id: "ses_existing",
-            directory: repo,
+            // realpath: makeTempDir returns a symlinked /var path on macOS, but
+            // findLatestTaskThread matches against the realpath'd workspace root.
+            directory: fs.realpathSync(repo),
             title: "OpenCode Companion Task: prior fixture task",
             agent: "plan",
             model: null,
