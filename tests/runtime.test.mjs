@@ -6,6 +6,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { runServerTurn } from "../plugins/opencode/scripts/lib/opencode.mjs";
+import { saveServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
 import { buildEnv, installFakeOpencode, readFakeState, readServerBootCount } from "./fake-opencode-fixture.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 
@@ -49,6 +51,78 @@ function cleanupServer(cwd, env) {
     env,
     input: JSON.stringify({ cwd, session_id: env.OPENCODE_COMPANION_SESSION_ID ?? "sess-current" })
   });
+}
+
+async function withProcessEnv(patch, fn) {
+  const previous = new Map();
+  for (const key of Object.keys(patch)) {
+    previous.set(key, process.env[key]);
+    if (patch[key] == null) {
+      delete process.env[key];
+    } else {
+      process.env[key] = patch[key];
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of previous) {
+      if (value == null) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+function runServerTurnEnv(env) {
+  return {
+    PATH: env.PATH,
+    CLAUDE_PLUGIN_DATA: env.CLAUDE_PLUGIN_DATA,
+    FAKE_OPENCODE_STATE_PATH: env.FAKE_OPENCODE_STATE_PATH,
+    OPENCODE_COMPANION_SESSION_ID: env.OPENCODE_COMPANION_SESSION_ID
+  };
+}
+
+function jsonResponse(value, status = 200) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
+}
+
+function installFailingCaptureFetch(createdSessionId = "ses_created") {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (requestUrl, options = {}) => {
+    const url = new URL(String(requestUrl));
+    const method = options.method ?? "GET";
+    calls.push({ method, pathname: url.pathname });
+
+    if (method === "GET" && url.pathname === "/global/health") {
+      return jsonResponse({ ok: true });
+    }
+    if (method === "POST" && url.pathname === "/session") {
+      return jsonResponse({ id: createdSessionId });
+    }
+    if (method === "GET" && url.pathname === "/event") {
+      return jsonResponse({ error: "event stream failed" }, 500);
+    }
+    if (method === "POST" && url.pathname === `/session/${createdSessionId}/abort`) {
+      return jsonResponse({ ok: true });
+    }
+
+    return jsonResponse({ error: "not found" }, 404);
+  };
+
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = previousFetch;
+    }
+  };
 }
 
 function runAsync(command, args, options = {}) {
@@ -413,5 +487,80 @@ test("task fails when completion has no recoverable current-turn message (issue 
     assert.equal(payload.rawOutput, "");
   } finally {
     cleanupServer(repo, env);
+  }
+});
+
+test("runServerTurn aborts only sessions created by a failed captureTurn", async () => {
+  const createdRepo = makeTempDir();
+  const createdBinDir = makeTempDir();
+  installFakeOpencode(createdBinDir);
+  const createdEnv = buildTestEnv(createdBinDir);
+  const createdFetch = installFailingCaptureFetch("ses_created");
+
+  try {
+    await withProcessEnv(runServerTurnEnv(createdEnv), async () => {
+      saveServerSession(createdRepo, {
+        url: "http://opencode.test",
+        pid: null,
+        pidFile: null,
+        logFile: null,
+        sessionDir: null,
+        external: false,
+        leases: []
+      });
+    });
+
+    await withProcessEnv(runServerTurnEnv(createdEnv), async () => {
+      await assert.rejects(
+        runServerTurn(createdRepo, { prompt: "fail during event open" }),
+        /OpenCode GET \/event failed with HTTP 500/
+      );
+    });
+
+    assert.equal(createdFetch.calls.filter((call) => call.method === "POST" && call.pathname === "/session").length, 1);
+    assert.equal(
+      createdFetch.calls.filter((call) => call.method === "POST" && call.pathname === "/session/ses_created/abort").length,
+      1
+    );
+  } finally {
+    createdFetch.restore();
+  }
+
+  const resumedRepo = makeTempDir();
+  const resumedBinDir = makeTempDir();
+  installFakeOpencode(resumedBinDir);
+  const resumedEnv = buildTestEnv(resumedBinDir);
+  const resumedFetch = installFailingCaptureFetch("ses_created");
+
+  try {
+    await withProcessEnv(runServerTurnEnv(resumedEnv), async () => {
+      saveServerSession(resumedRepo, {
+        url: "http://opencode.test",
+        pid: null,
+        pidFile: null,
+        logFile: null,
+        sessionDir: null,
+        external: false,
+        leases: []
+      });
+    });
+
+    await withProcessEnv(runServerTurnEnv(resumedEnv), async () => {
+      await assert.rejects(
+        runServerTurn(resumedRepo, {
+          prompt: "fail resumed event open",
+          resumeThreadId: "ses_existing"
+        }),
+        /OpenCode GET \/event failed with HTTP 500/
+      );
+    });
+
+    assert.equal(resumedFetch.calls.filter((call) => call.method === "POST" && call.pathname === "/session").length, 0);
+    assert.equal(
+      resumedFetch.calls.filter((call) => call.method === "POST" && call.pathname.endsWith("/abort")).length,
+      0
+    );
+  } finally {
+    resumedFetch.restore();
   }
 });

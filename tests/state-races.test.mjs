@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { makeTempDir, run } from "./helpers.mjs";
 import { runTrackedJob } from "../plugins/opencode/scripts/lib/tracked-jobs.mjs";
+import { loadServerSession, saveServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
 import {
   applyJobPatch,
   loadState,
@@ -201,5 +202,68 @@ test("cancel does not clobber a completed stored job when the state index is sta
     assert.deepEqual(storedJob.result, { ok: true });
     assert.equal(indexedJob.status, "completed");
     assert.equal(indexedJob.phase, "done");
+  });
+});
+
+test("cancel tears down the shared server session when only dead leases remain", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+
+  await withPluginData(pluginDataDir, async () => {
+    const jobId = "job-cancel-teardown";
+    const timestamp = new Date().toISOString();
+    const logFile = resolveJobLogFile(workspace, jobId);
+    const runningJob = {
+      id: jobId,
+      workspaceRoot: workspace,
+      jobClass: "task",
+      kind: "task",
+      status: "running",
+      phase: "running",
+      pid: null,
+      title: "Running task",
+      logFile,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    saveState(workspace, {
+      version: 1,
+      config: { stopReviewGate: false },
+      jobs: [runningJob]
+    });
+    writeJobFile(workspace, jobId, runningJob);
+    saveServerSession(workspace, {
+      url: "http://127.0.0.1:1",
+      pid: null,
+      pidFile: null,
+      logFile: null,
+      sessionDir: null,
+      external: false,
+      leases: [
+        {
+          pid: 999999999,
+          token: "dead-worker",
+          createdAt: timestamp,
+          expiresAt: new Date(Date.now() + 60000).toISOString()
+        }
+      ]
+    });
+
+    const result = run(process.execPath, [COMPANION, "cancel", jobId, "--cwd", workspace, "--json"], {
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: pluginDataDir,
+        OPENCODE_COMPANION_SESSION_ID: ""
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.cancelled, true);
+    assert.equal(payload.status, "cancelled");
+    assert.equal(loadServerSession(workspace), null);
+
+    const storedJob = readJobFile(resolveJobFile(workspace, jobId));
+    assert.equal(storedJob.status, "cancelled");
   });
 });

@@ -45,6 +45,7 @@ import {
   resolveResultJob,
   sortJobsNewestFirst
 } from "./lib/job-control.mjs";
+import { teardownServerSession } from "./lib/server-lifecycle.mjs";
 import {
   appendLogLine,
   createJobLogFile,
@@ -1096,6 +1097,17 @@ async function handleCancel(argv) {
       );
     }
     terminateProcessTree(currentJob.pid ?? Number.NaN);
+    try {
+      await teardownServerSession({
+        cwd: workspaceRoot,
+        ...(serverUrl ? { url: serverUrl } : {})
+      });
+    } catch (error) {
+      appendLogLine(
+        cancelResult.job.logFile,
+        `OpenCode server teardown failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
     appendLogLine(cancelResult.job.logFile, "Cancelled by user.");
   }
 
