@@ -446,10 +446,11 @@ export function renderStoredJobResult(job, storedJob) {
 }
 
 export function renderCancelReport(job) {
+  const cancelled = job.status === "cancelled";
   const lines = [
     "# OpenCode Cancel",
     "",
-    `Cancelled ${job.id}.`,
+    cancelled ? `Cancelled ${job.id}.` : `${job.id} is already ${job.status}; cancel was not applied.`,
     ""
   ];
 

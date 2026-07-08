@@ -27,11 +27,14 @@ import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "
 import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import {
+  applyJobPatch,
   generateJobId,
   getConfig,
   listJobs,
   setConfig,
+  updateState,
   upsertJob,
+  withStateLock,
   writeJobFile
 } from "./lib/state.mjs";
 import {
@@ -890,6 +893,100 @@ function handleTaskResumeCandidate(argv) {
   outputCommandResult(payload, rendered, options.json);
 }
 
+function isCompletionTerminalStatus(status) {
+  return status === "completed" || status === "failed";
+}
+
+function terminalJobIndexPatch(job) {
+  return Object.fromEntries(
+    Object.entries({
+      id: job.id,
+      status: job.status,
+      phase: job.phase ?? (job.status === "completed" ? "done" : "failed"),
+      pid: null,
+      threadId: job.threadId,
+      turnId: job.turnId,
+      serverUrl: job.serverUrl,
+      summary: job.summary,
+      errorMessage: job.errorMessage,
+      completedAt: job.completedAt
+    }).filter(([, value]) => value !== undefined)
+  );
+}
+
+function syncTerminalJobIndex(workspaceRoot, job) {
+  updateState(workspaceRoot, (state) => {
+    applyJobPatch(state, terminalJobIndexPatch(job));
+  });
+  return {
+    ...job,
+    pid: null
+  };
+}
+
+function readCurrentCancelJob(workspaceRoot, job) {
+  let currentJob = job;
+  withStateLock(workspaceRoot, () => {
+    const stateJob = listJobs(workspaceRoot).find((candidate) => candidate.id === job.id) ?? null;
+    const storedJob = readStoredJob(workspaceRoot, job.id);
+    currentJob = {
+      ...job,
+      ...(stateJob ?? {}),
+      ...(storedJob ?? {})
+    };
+  });
+  return currentJob;
+}
+
+function cancelJobIfStillActive(workspaceRoot, job, completedAt) {
+  let cancelled = false;
+  let nextJob = job;
+
+  updateState(workspaceRoot, (state) => {
+    const stateJob = state.jobs.find((candidate) => candidate.id === job.id) ?? null;
+    const storedJob = readStoredJob(workspaceRoot, job.id);
+    const currentJob = {
+      ...job,
+      ...(stateJob ?? {}),
+      ...(storedJob ?? {})
+    };
+
+    if (isCompletionTerminalStatus(currentJob.status)) {
+      applyJobPatch(state, terminalJobIndexPatch(currentJob));
+      nextJob = {
+        ...currentJob,
+        pid: null
+      };
+      return;
+    }
+
+    nextJob = {
+      ...currentJob,
+      status: "cancelled",
+      phase: "cancelled",
+      pid: null,
+      completedAt,
+      errorMessage: "Cancelled by user."
+    };
+
+    writeJobFile(workspaceRoot, job.id, {
+      ...nextJob,
+      cancelledAt: completedAt
+    });
+    applyJobPatch(state, {
+      id: job.id,
+      status: "cancelled",
+      phase: "cancelled",
+      pid: null,
+      errorMessage: "Cancelled by user.",
+      completedAt
+    });
+    cancelled = true;
+  });
+
+  return { cancelled, job: nextJob };
+}
+
 async function handleCancel(argv) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["cwd"],
@@ -899,52 +996,50 @@ async function handleCancel(argv) {
   const cwd = resolveCommandCwd(options);
   const reference = positionals[0] ?? "";
   const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { env: process.env });
-  const existing = readStoredJob(workspaceRoot, job.id) ?? {};
-  const threadId = existing.threadId ?? job.threadId ?? null;
-  const turnId = existing.turnId ?? job.turnId ?? null;
-  const serverUrl = existing.serverUrl ?? job.serverUrl ?? null;
+  const currentJob = readCurrentCancelJob(workspaceRoot, job);
 
-  const interrupt = await interruptServerTurn(cwd, { threadId, turnId, serverUrl });
-  if (interrupt.attempted) {
-    appendLogLine(
-      job.logFile,
-      interrupt.interrupted
-        ? `Requested OpenCode session abort for ${threadId}.`
-        : `OpenCode session abort failed${interrupt.detail ? `: ${interrupt.detail}` : "."}`
-    );
+  if (isCompletionTerminalStatus(currentJob.status)) {
+    const syncedJob = syncTerminalJobIndex(workspaceRoot, currentJob);
+    const payload = {
+      jobId: syncedJob.id,
+      status: syncedJob.status,
+      title: syncedJob.title,
+      cancelled: false,
+      turnInterruptAttempted: false,
+      turnInterrupted: false
+    };
+
+    outputCommandResult(payload, renderCancelReport(syncedJob), options.json);
+    return;
   }
 
-  terminateProcessTree(job.pid ?? Number.NaN);
-  appendLogLine(job.logFile, "Cancelled by user.");
+  const threadId = currentJob.threadId ?? null;
+  const turnId = currentJob.turnId ?? null;
+  const serverUrl = currentJob.serverUrl ?? null;
 
+  const interrupt = await interruptServerTurn(cwd, { threadId, turnId, serverUrl });
   const completedAt = nowIso();
-  const nextJob = {
-    ...job,
-    status: "cancelled",
-    phase: "cancelled",
-    pid: null,
-    completedAt,
-    errorMessage: "Cancelled by user."
-  };
+  const cancelResult = cancelJobIfStillActive(workspaceRoot, currentJob, completedAt);
+  if (cancelResult.cancelled) {
+    if (interrupt.attempted) {
+      appendLogLine(
+        cancelResult.job.logFile,
+        interrupt.interrupted
+          ? `Requested OpenCode session abort for ${threadId}.`
+          : `OpenCode session abort failed${interrupt.detail ? `: ${interrupt.detail}` : "."}`
+      );
+    }
+    terminateProcessTree(currentJob.pid ?? Number.NaN);
+    appendLogLine(cancelResult.job.logFile, "Cancelled by user.");
+  }
 
-  writeJobFile(workspaceRoot, job.id, {
-    ...existing,
-    ...nextJob,
-    cancelledAt: completedAt
-  });
-  upsertJob(workspaceRoot, {
-    id: job.id,
-    status: "cancelled",
-    phase: "cancelled",
-    pid: null,
-    errorMessage: "Cancelled by user.",
-    completedAt
-  });
+  const nextJob = cancelResult.job;
 
   const payload = {
-    jobId: job.id,
-    status: "cancelled",
-    title: job.title,
+    jobId: nextJob.id,
+    status: nextJob.status,
+    title: nextJob.title,
+    cancelled: cancelResult.cancelled,
     turnInterruptAttempted: interrupt.attempted,
     turnInterrupted: interrupt.interrupted
   };

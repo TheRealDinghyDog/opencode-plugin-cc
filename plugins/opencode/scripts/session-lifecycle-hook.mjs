@@ -12,7 +12,7 @@ import {
   loadServerSession,
   teardownServerSession
 } from "./lib/server-lifecycle.mjs";
-import { loadState, resolveStateFile, saveState } from "./lib/state.mjs";
+import { resolveStateFile, updateState } from "./lib/state.mjs";
 import { TRANSCRIPT_PATH_ENV } from "./lib/claude-session-transfer.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 
@@ -49,8 +49,11 @@ function cleanupSessionJobs(cwd, sessionId) {
     return;
   }
 
-  const state = loadState(workspaceRoot);
-  const removedJobs = state.jobs.filter((job) => job.sessionId === sessionId);
+  let removedJobs = [];
+  updateState(workspaceRoot, (state) => {
+    removedJobs = state.jobs.filter((job) => job.sessionId === sessionId);
+    state.jobs = state.jobs.filter((job) => job.sessionId !== sessionId);
+  });
   if (removedJobs.length === 0) {
     return;
   }
@@ -67,10 +70,6 @@ function cleanupSessionJobs(cwd, sessionId) {
     }
   }
 
-  saveState(workspaceRoot, {
-    ...state,
-    jobs: state.jobs.filter((job) => job.sessionId !== sessionId)
-  });
 }
 
 function handleSessionStart(input) {
@@ -93,7 +92,8 @@ async function handleSessionEnd(input) {
       : null);
 
   cleanupSessionJobs(cwd, input.session_id || process.env[SESSION_ID_ENV]);
-  await teardownServerSession({
+  const teardown = await teardownServerSession({
+    cwd,
     url: serverSession?.url ?? null,
     pidFile: serverSession?.pidFile ?? null,
     logFile: serverSession?.logFile ?? null,
@@ -102,7 +102,9 @@ async function handleSessionEnd(input) {
     external: Boolean(serverSession?.external),
     killProcess: terminateProcessTree
   });
-  clearServerSession(cwd);
+  if (!teardown?.skipped) {
+    clearServerSession(cwd);
+  }
 }
 
 async function main() {
