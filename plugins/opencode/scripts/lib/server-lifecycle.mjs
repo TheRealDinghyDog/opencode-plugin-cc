@@ -18,6 +18,7 @@ const SERVER_LOCK_INFO_FILE = "owner.json";
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const DEFAULT_LOCK_STALE_MS = 30000;
 const DEFAULT_LOCK_POLL_MS = 100;
+const DEFAULT_LEASE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -194,6 +195,47 @@ async function loadHealthyServerSession(cwd, healthTimeoutMs) {
   return null;
 }
 
+function createServerLease(options = {}) {
+  const createdAt = new Date();
+  const ttlMs = Math.max(1000, Number(options.leaseTtlMs) || DEFAULT_LEASE_TTL_MS);
+  return {
+    pid: process.pid,
+    token: `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    createdAt: createdAt.toISOString(),
+    expiresAt: new Date(createdAt.getTime() + ttlMs).toISOString()
+  };
+}
+
+function isLeaseActive(lease, nowMs = Date.now()) {
+  const expiresAt = Date.parse(lease?.expiresAt ?? "");
+  if (Number.isFinite(expiresAt) && expiresAt <= nowMs) {
+    return false;
+  }
+
+  const alive = processIsAlive(Number(lease?.pid));
+  return alive !== false;
+}
+
+function pruneServerLeases(session) {
+  const leases = Array.isArray(session?.leases) ? session.leases.filter((lease) => isLeaseActive(lease)) : [];
+  return {
+    ...session,
+    leases
+  };
+}
+
+function hasActiveServerLeases(session) {
+  return Array.isArray(session?.leases) && session.leases.some((lease) => isLeaseActive(lease));
+}
+
+function addServerLease(session, options = {}) {
+  const pruned = pruneServerLeases(session);
+  return {
+    ...pruned,
+    leases: [...pruned.leases, createServerLease(options)]
+  };
+}
+
 async function acquireServerLock(cwd, options = {}) {
   const stateDir = resolveStateDir(cwd);
   fs.mkdirSync(stateDir, { recursive: true });
@@ -201,7 +243,6 @@ async function acquireServerLock(cwd, options = {}) {
   const lockDir = resolveServerLockDir(cwd);
   const staleMs = Math.max(1000, Number(options.lockStaleMs) || DEFAULT_LOCK_STALE_MS);
   const pollMs = Math.max(25, Number(options.lockPollMs) || DEFAULT_LOCK_POLL_MS);
-  const healthTimeoutMs = options.healthTimeoutMs ?? 500;
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   for (;;) {
@@ -210,12 +251,6 @@ async function acquireServerLock(cwd, options = {}) {
     } catch (error) {
       if (error?.code !== "EEXIST") {
         throw error;
-      }
-
-      // The lock is held. Reuse an already-started healthy server if one exists.
-      const existing = await loadHealthyServerSession(cwd, healthTimeoutMs);
-      if (existing) {
-        return { session: existing, release: null };
       }
 
       // If the holder looks stale, clear it via an atomic single-winner steal
@@ -320,20 +355,14 @@ export async function ensureServer(cwd, options = {}) {
     };
   }
 
-  const existing = await loadHealthyServerSession(cwd, options.healthTimeoutMs ?? 500);
-  if (existing) {
-    return existing;
-  }
-
   const lock = await acquireServerLock(cwd, options);
-  if (lock.session) {
-    return lock.session;
-  }
 
   try {
     const lockedExisting = await loadHealthyServerSession(cwd, options.healthTimeoutMs ?? 500);
     if (lockedExisting) {
-      return lockedExisting;
+      const leasedExisting = addServerLease(lockedExisting, options);
+      saveServerSession(cwd, leasedExisting);
+      return leasedExisting;
     }
 
     const staleExisting = loadServerSession(cwd);
@@ -381,14 +410,15 @@ export async function ensureServer(cwd, options = {}) {
       sessionDir,
       external: false
     };
-    saveServerSession(cwd, session);
-    return session;
+    const leasedSession = addServerLease(session, options);
+    saveServerSession(cwd, leasedSession);
+    return leasedSession;
   } finally {
     lock.release?.();
   }
 }
 
-export async function teardownServerSession({
+async function teardownServerSessionUnlocked({
   url = null,
   pidFile = null,
   logFile = null,
@@ -428,5 +458,63 @@ export async function teardownServerSession({
     } catch {
       // Ignore non-empty or missing directories.
     }
+  }
+
+  return { skipped: false };
+}
+
+export async function teardownServerSession({
+  cwd = null,
+  force = false,
+  url = null,
+  pidFile = null,
+  logFile = null,
+  sessionDir = null,
+  pid = null,
+  external = false,
+  killProcess = null
+} = {}) {
+  if (!cwd) {
+    return teardownServerSessionUnlocked({
+      url,
+      pidFile,
+      logFile,
+      sessionDir,
+      pid,
+      external,
+      killProcess
+    });
+  }
+
+  const lock = await acquireServerLock(cwd);
+  try {
+    const current = loadServerSession(cwd);
+    const currentUrl = normalizeUrl(current?.url);
+    const requestedUrl = normalizeUrl(url);
+    const session = current && (!requestedUrl || currentUrl === requestedUrl) ? current : null;
+    if (session && !force) {
+      const pruned = pruneServerLeases(session);
+      if (hasActiveServerLeases(pruned)) {
+        saveServerSession(cwd, pruned);
+        return { skipped: true, reason: "active-leases" };
+      }
+    }
+
+    const teardownTarget = {
+      url: session?.url ?? url,
+      pidFile: session?.pidFile ?? pidFile,
+      logFile: session?.logFile ?? logFile,
+      sessionDir: session?.sessionDir ?? sessionDir,
+      pid: session?.pid ?? pid,
+      external: Boolean(session?.external ?? external),
+      killProcess
+    };
+    const result = await teardownServerSessionUnlocked(teardownTarget);
+    if (session) {
+      clearServerSession(cwd);
+    }
+    return result;
+  } finally {
+    lock.release?.();
   }
 }

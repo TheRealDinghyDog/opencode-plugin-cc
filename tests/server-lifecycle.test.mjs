@@ -3,7 +3,8 @@ import net from "node:net";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { isServerHealthy } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+import { makeTempDir } from "./helpers.mjs";
+import { isServerHealthy, loadServerSession, saveServerSession, teardownServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {
@@ -51,3 +52,51 @@ test(
   }
   }
 );
+
+test("teardownServerSession skips local teardown while a server lease is active", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+
+  try {
+    const session = {
+      url: "http://127.0.0.1:1",
+      pid: 123456,
+      pidFile: null,
+      logFile: null,
+      sessionDir: null,
+      external: false,
+      leases: [
+        {
+          pid: process.pid,
+          token: "test-lease",
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 60000).toISOString()
+        }
+      ]
+    };
+    saveServerSession(workspace, session);
+
+    let killedPid = null;
+    const result = await teardownServerSession({
+      cwd: workspace,
+      url: session.url,
+      pid: session.pid,
+      killProcess: (pid) => {
+        killedPid = pid;
+      }
+    });
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, "active-leases");
+    assert.equal(killedPid, null);
+    assert.equal(loadServerSession(workspace).url, session.url);
+  } finally {
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});

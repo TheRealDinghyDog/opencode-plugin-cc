@@ -10,7 +10,12 @@ const PLUGIN_DATA_ENV = "CLAUDE_PLUGIN_DATA";
 const FALLBACK_STATE_ROOT_DIR = path.join(os.tmpdir(), "opencode-companion");
 const STATE_FILE_NAME = "state.json";
 const JOBS_DIR_NAME = "jobs";
+const STATE_LOCK_DIR_NAME = "state.lock";
+const LOCK_INFO_FILE = "owner.json";
 const MAX_JOBS = 50;
+const DEFAULT_LOCK_STALE_MS = 30000;
+const DEFAULT_LOCK_POLL_MS = 25;
+const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 
 function nowIso() {
   return new Date().toISOString();
@@ -51,11 +56,136 @@ export function resolveJobsDir(cwd) {
   return path.join(resolveStateDir(cwd), JOBS_DIR_NAME);
 }
 
+function resolveStateLockDir(cwd) {
+  return path.join(resolveStateDir(cwd), STATE_LOCK_DIR_NAME);
+}
+
 export function ensureStateDir(cwd) {
   fs.mkdirSync(resolveJobsDir(cwd), { recursive: true });
 }
 
-export function loadState(cwd) {
+function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function readLockInfo(lockDir) {
+  const infoFile = path.join(lockDir, LOCK_INFO_FILE);
+  try {
+    return JSON.parse(fs.readFileSync(infoFile, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function lockAgeMs(lockDir, info) {
+  const created = Date.parse(info?.createdAt ?? "");
+  if (Number.isFinite(created)) {
+    return Date.now() - created;
+  }
+
+  try {
+    return Date.now() - fs.statSync(lockDir).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+function isStateLockStale(lockDir, staleMs) {
+  if (!fs.existsSync(lockDir)) {
+    return true;
+  }
+
+  const info = readLockInfo(lockDir);
+  if (processIsAlive(Number(info?.pid)) === false) {
+    return true;
+  }
+
+  return lockAgeMs(lockDir, info) > staleMs;
+}
+
+function removeStateLock(lockDir) {
+  try {
+    fs.rmSync(lockDir, { recursive: true, force: true });
+  } catch {
+    // Another process may have removed or replaced the lock.
+  }
+}
+
+function stealStaleStateLock(lockDir) {
+  const stalePath = `${lockDir}.stale-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    fs.renameSync(lockDir, stalePath);
+  } catch {
+    return;
+  }
+  removeStateLock(stalePath);
+}
+
+function releaseStateLock(lockDir, token) {
+  const info = readLockInfo(lockDir);
+  if (info?.token !== token) {
+    return;
+  }
+  removeStateLock(lockDir);
+}
+
+function acquireStateLock(cwd, options = {}) {
+  const stateDir = resolveStateDir(cwd);
+  fs.mkdirSync(stateDir, { recursive: true });
+
+  const lockDir = resolveStateLockDir(cwd);
+  const staleMs = Math.max(1000, Number(options.lockStaleMs) || DEFAULT_LOCK_STALE_MS);
+  const pollMs = Math.max(10, Number(options.lockPollMs) || DEFAULT_LOCK_POLL_MS);
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  for (;;) {
+    try {
+      fs.mkdirSync(lockDir);
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+      if (isStateLockStale(lockDir, staleMs)) {
+        stealStaleStateLock(lockDir);
+      }
+      Atomics.wait(sleepBuffer, 0, 0, pollMs);
+      continue;
+    }
+
+    try {
+      fs.writeFileSync(
+        path.join(lockDir, LOCK_INFO_FILE),
+        `${JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }, null, 2)}\n`,
+        "utf8"
+      );
+    } catch (error) {
+      removeStateLock(lockDir);
+      throw error;
+    }
+
+    return () => releaseStateLock(lockDir, token);
+  }
+}
+
+export function withStateLock(cwd, fn) {
+  const release = acquireStateLock(cwd);
+  try {
+    return fn();
+  } finally {
+    release();
+  }
+}
+
+function loadStateUnlocked(cwd) {
   const stateFile = resolveStateFile(cwd);
   if (!fs.existsSync(stateFile)) {
     return defaultState();
@@ -77,6 +207,10 @@ export function loadState(cwd) {
   }
 }
 
+export function loadState(cwd) {
+  return loadStateUnlocked(cwd);
+}
+
 function pruneJobs(jobs) {
   return [...jobs]
     .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))
@@ -89,8 +223,24 @@ function removeFileIfExists(filePath) {
   }
 }
 
-export function saveState(cwd, state) {
-  const previousJobs = loadState(cwd).jobs;
+function atomicWriteFile(filePath, contents) {
+  const tempFile = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    fs.writeFileSync(tempFile, contents, "utf8");
+    fs.renameSync(tempFile, filePath);
+  } catch (error) {
+    try {
+      if (fs.existsSync(tempFile)) {
+        fs.unlinkSync(tempFile);
+      }
+    } catch {
+      // Ignore cleanup failures for a best-effort temp file.
+    }
+    throw error;
+  }
+}
+
+function saveStateUnlocked(cwd, state, previousJobs = loadStateUnlocked(cwd).jobs) {
   ensureStateDir(cwd);
   const nextJobs = pruneJobs(state.jobs ?? []);
   const nextState = {
@@ -102,6 +252,8 @@ export function saveState(cwd, state) {
     jobs: nextJobs
   };
 
+  atomicWriteFile(resolveStateFile(cwd), `${JSON.stringify(nextState, null, 2)}\n`);
+
   const retainedIds = new Set(nextJobs.map((job) => job.id));
   for (const job of previousJobs) {
     if (retainedIds.has(job.id)) {
@@ -111,14 +263,37 @@ export function saveState(cwd, state) {
     removeFileIfExists(job.logFile);
   }
 
-  fs.writeFileSync(resolveStateFile(cwd), `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
   return nextState;
 }
 
+export function saveState(cwd, state) {
+  return withStateLock(cwd, () => saveStateUnlocked(cwd, state));
+}
+
+export function applyJobPatch(state, jobPatch, timestamp = nowIso()) {
+  const existingIndex = state.jobs.findIndex((job) => job.id === jobPatch.id);
+  if (existingIndex === -1) {
+    state.jobs.unshift({
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      ...jobPatch
+    });
+    return;
+  }
+  state.jobs[existingIndex] = {
+    ...state.jobs[existingIndex],
+    ...jobPatch,
+    updatedAt: timestamp
+  };
+}
+
 export function updateState(cwd, mutate) {
-  const state = loadState(cwd);
-  mutate(state);
-  return saveState(cwd, state);
+  return withStateLock(cwd, () => {
+    const state = loadStateUnlocked(cwd);
+    const previousJobs = [...state.jobs];
+    mutate(state);
+    return saveStateUnlocked(cwd, state, previousJobs);
+  });
 }
 
 export function generateJobId(prefix = "job") {
@@ -128,21 +303,7 @@ export function generateJobId(prefix = "job") {
 
 export function upsertJob(cwd, jobPatch) {
   return updateState(cwd, (state) => {
-    const timestamp = nowIso();
-    const existingIndex = state.jobs.findIndex((job) => job.id === jobPatch.id);
-    if (existingIndex === -1) {
-      state.jobs.unshift({
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        ...jobPatch
-      });
-      return;
-    }
-    state.jobs[existingIndex] = {
-      ...state.jobs[existingIndex],
-      ...jobPatch,
-      updatedAt: timestamp
-    };
+    applyJobPatch(state, jobPatch);
   });
 }
 
@@ -166,7 +327,7 @@ export function getConfig(cwd) {
 export function writeJobFile(cwd, jobId, payload) {
   ensureStateDir(cwd);
   const jobFile = resolveJobFile(cwd, jobId);
-  fs.writeFileSync(jobFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  atomicWriteFile(jobFile, `${JSON.stringify(payload, null, 2)}\n`);
   return jobFile;
 }
 
