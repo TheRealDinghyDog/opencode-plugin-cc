@@ -110,7 +110,7 @@ function installFailingCaptureFetch(createdSessionId = "ses_created") {
     if (method === "GET" && url.pathname === "/event") {
       return jsonResponse({ error: "event stream failed" }, 500);
     }
-    if (method === "POST" && url.pathname === `/session/${createdSessionId}/abort`) {
+    if (method === "DELETE" && url.pathname === `/session/${createdSessionId}`) {
       return jsonResponse({ ok: true });
     }
 
@@ -490,7 +490,7 @@ test("task fails when completion has no recoverable current-turn message (issue 
   }
 });
 
-test("runServerTurn aborts only sessions created by a failed captureTurn", async () => {
+test("runServerTurn deletes only sessions created by a failed captureTurn", async () => {
   const createdRepo = makeTempDir();
   const createdBinDir = makeTempDir();
   installFakeOpencode(createdBinDir);
@@ -519,7 +519,7 @@ test("runServerTurn aborts only sessions created by a failed captureTurn", async
 
     assert.equal(createdFetch.calls.filter((call) => call.method === "POST" && call.pathname === "/session").length, 1);
     assert.equal(
-      createdFetch.calls.filter((call) => call.method === "POST" && call.pathname === "/session/ses_created/abort").length,
+      createdFetch.calls.filter((call) => call.method === "DELETE" && call.pathname === "/session/ses_created").length,
       1
     );
   } finally {
@@ -557,7 +557,7 @@ test("runServerTurn aborts only sessions created by a failed captureTurn", async
 
     assert.equal(resumedFetch.calls.filter((call) => call.method === "POST" && call.pathname === "/session").length, 0);
     assert.equal(
-      resumedFetch.calls.filter((call) => call.method === "POST" && call.pathname.endsWith("/abort")).length,
+      resumedFetch.calls.filter((call) => call.method === "DELETE" && call.pathname.startsWith("/session/")).length,
       0
     );
   } finally {

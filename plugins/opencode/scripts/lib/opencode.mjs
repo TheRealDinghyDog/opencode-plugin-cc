@@ -1034,9 +1034,9 @@ export async function runServerTurn(cwd, options = {}) {
     } catch (error) {
       if (createdSessionID) {
         try {
-          await client.abort(createdSessionID);
+          await client.deleteSession(createdSessionID);
         } catch {
-          // Preserve the turn failure; abort is best-effort cleanup.
+          // Preserve the turn failure; session deletion is best-effort cleanup.
         }
       }
       throw error;
