@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { buildOpenCodeImportDocumentFromClaudeJsonl } from "./claude-session-transfer.mjs";
 import { createTempDir, readJsonFile, writeJsonFile } from "./fs.mjs";
-import { OpencodeServerClient } from "./opencode-server.mjs";
+import { OpencodeHttpError, OpencodeServerClient } from "./opencode-server.mjs";
 import { SERVER_URL_ENV, ensureServer, loadServerSession } from "./server-lifecycle.mjs";
 import { binaryAvailable, runCommandChecked } from "./process.mjs";
 
@@ -13,6 +13,11 @@ const DEFAULT_CONTINUE_PROMPT =
 const MODEL_ALIASES = new Map([["spark", "openai/gpt-5.3-codex-spark"]]);
 const WRITE_AGENT = "build";
 const READ_ONLY_AGENT = "plan";
+// A turn is normally completed by a `session.idle` event. This is only a
+// last-resort ceiling so a dropped event stream can't hang the turn forever
+// (issue #2 / review finding #17). Deep reviews legitimately run many minutes,
+// so keep it generous; on expiry we still try to recover the final message.
+const DEFAULT_TURN_TIMEOUT_MS = 30 * 60 * 1000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -230,6 +235,27 @@ function extractMessageParts(value) {
   return Array.isArray(parts) ? parts : [];
 }
 
+function getMessagesArray(response) {
+  if (Array.isArray(response)) {
+    return response;
+  }
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+  if (Array.isArray(response?.messages)) {
+    return response.messages;
+  }
+  return [];
+}
+
+function isAssistantMessage(message) {
+  return (message?.info?.role ?? message?.role) === "assistant";
+}
+
+function extractMessageId(message) {
+  return message?.info?.id ?? message?.id ?? null;
+}
+
 function textFromContent(content) {
   if (typeof content === "string") {
     return content;
@@ -335,12 +361,16 @@ function createTurnCaptureState(sessionID, options = {}) {
     completion,
     resolveCompletion,
     rejectCompletion,
+    priorAssistantIds: new Set(options.priorAssistantIds ?? []),
     finalMessage: "",
     structuredOutput: null,
     reasoningSummary: [],
     touchedFiles: new Set(),
     commandExecutions: [],
     error: null,
+    streamError: null,
+    responseError: null,
+    recoveryError: null,
     response: null,
     fallbackTimer: null,
     onProgress: options.onProgress ?? null,
@@ -569,6 +599,53 @@ async function applyOpenCodeEvent(client, state, event, meta = {}) {
   }
 }
 
+// When the turn's transport dies or the event stream drops before we captured a
+// result, the OpenCode server may still hold the completed assistant message.
+// Re-fetch it over HTTP so a slow-but-successful turn isn't reported as failed
+// (issue #2).
+async function recoverFinalMessageFromServer(client, state, options = {}) {
+  try {
+    const raw = await client.listMessages(state.sessionID, { signal: options.signal });
+    const messages = getMessagesArray(raw).filter(isAssistantMessage);
+    const assistant = state.messageID
+      ? messages.find((message) => extractMessageId(message) === state.messageID)
+      : messages
+          .filter((message) => {
+            const messageID = extractMessageId(message);
+            return messageID && !state.priorAssistantIds.has(messageID);
+          })
+          .pop();
+    if (!assistant) {
+      return false;
+    }
+    state.messageID = extractMessageId(assistant) ?? state.messageID;
+    applyMessageParts(state, extractMessageParts(assistant), state.sessionID);
+    if (state.finalMessage || state.structuredOutput != null) {
+      state.recovered = true;
+      completeTurn(state);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    state.recoveryError = error;
+    return false;
+  }
+}
+
+async function snapshotPriorAssistantIds(client, state, options = {}) {
+  try {
+    const raw = await client.listMessages(state.sessionID, { signal: options.signal });
+    state.priorAssistantIds = new Set(
+      getMessagesArray(raw)
+        .filter(isAssistantMessage)
+        .map(extractMessageId)
+        .filter(Boolean)
+    );
+  } catch {
+    state.priorAssistantIds = new Set();
+  }
+}
+
 async function captureTurn(client, sessionID, startRequest, options = {}) {
   const state = createTurnCaptureState(sessionID, options);
   const eventAbort = new AbortController();
@@ -579,6 +656,9 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
     rejectOpen = reject;
   });
 
+  // The event stream is the source of truth for turn completion. If it drops we
+  // record the error but do NOT fail the turn outright — the completed message
+  // may still be recoverable from the server (issue #2).
   const eventStream = client
     .subscribeEvents((event, meta) => applyOpenCodeEvent(client, state, event, meta), {
       signal: eventAbort.signal,
@@ -588,9 +668,13 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
       if (eventAbort.signal.aborted) {
         return;
       }
+      state.streamError = error;
       rejectOpen(error);
-      state.rejectCompletion(error);
     });
+
+  const turnTimeoutMs = Math.max(0, Number(options.turnTimeoutMs) || DEFAULT_TURN_TIMEOUT_MS);
+  let timedOut = false;
+  let turnTimer = null;
 
   try {
     await Promise.race([
@@ -600,17 +684,69 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
       })
     ]);
 
-    const responsePromise = startRequest().then((response) => {
-      state.response = response;
-      state.messageID = response?.info?.id ?? response?.id ?? state.messageID;
-      applyMessageParts(state, response?.parts ?? [], state.sessionID);
-      scheduleResponseFallbackCompletion(state);
-      return response;
-    });
+    await snapshotPriorAssistantIds(client, state, { signal: eventAbort.signal });
 
-    await Promise.all([state.completion, responsePromise]);
+    // Send the prompt. The synchronous /message endpoint keeps this request open
+    // for the whole turn, so on long turns it can hit the client fetch timeout and
+    // reject with a transport error well before `session.idle` arrives. That
+    // transport failure must NOT fail the turn — only a real HTTP rejection (bad
+    // request, bad model, etc.) is fatal (issue #2 / findings #16, #17).
+    const responsePromise = startRequest(eventAbort.signal)
+      .then((response) => {
+        state.response = response;
+        state.messageID = response?.info?.id ?? response?.id ?? state.messageID;
+        applyMessageParts(state, response?.parts ?? [], state.sessionID);
+        scheduleResponseFallbackCompletion(state);
+        return response;
+      })
+      .catch((error) => {
+        state.responseError = error;
+        // A server-side rejection is terminal; a transport error is not.
+        if (error instanceof OpencodeHttpError) {
+          state.error = error;
+          completeTurn(state);
+        }
+        return null;
+      });
+
+    // Complete on `session.idle` / `session.error` / the response fallback, on the
+    // stream closing, or on the outer safety timeout — whichever comes first.
+    const timeoutPromise =
+      turnTimeoutMs > 0
+        ? new Promise((resolve) => {
+            turnTimer = setTimeout(() => {
+              timedOut = true;
+              resolve();
+            }, turnTimeoutMs);
+            turnTimer.unref?.();
+          })
+        : new Promise(() => {});
+    await Promise.race([state.completion, eventStream, timeoutPromise]);
+
+    // If we didn't capture a usable result, pull the finished message straight
+    // from the server before giving up.
+    if (!state.error && (!state.completed || (!state.finalMessage && state.structuredOutput == null))) {
+      await recoverFinalMessageFromServer(client, state, { signal: eventAbort.signal });
+    }
+
+    // Nothing captured and no genuine error => surface the underlying cause.
+    if (!state.error && !state.finalMessage && state.structuredOutput == null) {
+      state.error =
+        state.recoveryError ??
+        state.responseError ??
+        state.streamError ??
+        new Error(
+          timedOut
+            ? "OpenCode turn timed out before completion."
+            : "OpenCode turn ended without a result."
+        );
+    }
+
     return state;
   } finally {
+    if (turnTimer) {
+      clearTimeout(turnTimer);
+    }
     eventAbort.abort();
     await eventStream.catch(() => {});
     if (state.fallbackTimer) {
@@ -873,7 +1009,7 @@ export async function runServerTurn(cwd, options = {}) {
     const turnState = await captureTurn(
       client,
       sessionID,
-      () =>
+      (signal) =>
         client.sendMessage(
           sessionID,
           buildMessageParams(prompt, {
@@ -882,11 +1018,13 @@ export async function runServerTurn(cwd, options = {}) {
             outputSchema: options.outputSchema ?? null,
             write,
             agent
-          })
+          }),
+          { signal }
         ),
       {
         onProgress: options.onProgress,
-        write
+        write,
+        turnTimeoutMs: options.turnTimeoutMs
       }
     );
 

@@ -182,6 +182,12 @@ export class OpencodeServerClient {
     return this.request("GET", "/session", { signal: options.signal });
   }
 
+  listMessages(sessionID, options = {}) {
+    return this.request("GET", `/session/${encodePathSegment(sessionID)}/message`, {
+      signal: options.signal
+    });
+  }
+
   respondPermission(sessionID, permissionID, response = "always", options = {}) {
     return this.request("POST", `/session/${encodePathSegment(sessionID)}/permissions/${encodePathSegment(permissionID)}`, {
       body: { response },
