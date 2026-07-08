@@ -71,7 +71,6 @@ const REVIEW_SCHEMA = path.join(ROOT_DIR, "schemas", "review-output.schema.json"
 const DEFAULT_STATUS_WAIT_TIMEOUT_MS = 240000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
 const MODEL_ALIASES = new Map([["spark", "openai/gpt-5.3-codex-spark"]]);
-const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Claude turn.";
 
 function printUsage() {
   console.log(
@@ -277,8 +276,7 @@ function findLatestResumableTaskJob(jobs) {
       (job) =>
         job.jobClass === "task" &&
         job.threadId &&
-        job.status !== "queued" &&
-        job.status !== "running"
+        job.status === "completed"
     ) ?? null
   );
 }
@@ -392,7 +390,8 @@ async function executeTaskRun(request) {
 
   const taskMetadata = buildTaskRunMetadata({
     prompt: request.prompt,
-    resumeLast: request.resumeLast
+    resumeLast: request.resumeLast,
+    stopReview: request.stopReview
   });
 
   let resumeThreadId = null;
@@ -467,8 +466,8 @@ function buildReviewJobMetadata(reviewName, target) {
   };
 }
 
-function buildTaskRunMetadata({ prompt, resumeLast = false }) {
-  if (!resumeLast && String(prompt ?? "").includes(STOP_REVIEW_TASK_MARKER)) {
+function buildTaskRunMetadata({ prompt, resumeLast = false, stopReview = false }) {
+  if (!resumeLast && stopReview) {
     return {
       title: "OpenCode Stop Gate Review",
       summary: "Stop-gate review of previous Claude turn"
@@ -531,7 +530,7 @@ function buildTaskJob(workspaceRoot, taskMetadata, write) {
   });
 }
 
-function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId }) {
+function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, stopReview, jobId }) {
   return {
     cwd,
     model,
@@ -539,6 +538,7 @@ function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId
     prompt,
     write,
     resumeLast,
+    stopReview,
     jobId
   };
 }
@@ -611,21 +611,83 @@ function spawnDetachedTaskWorker(cwd, jobId) {
   return child;
 }
 
+function markQueuedTaskSpawned(workspaceRoot, jobId, pid) {
+  if (pid == null) {
+    return;
+  }
+
+  updateState(workspaceRoot, (state) => {
+    const storedJob = readStoredJob(workspaceRoot, jobId);
+    if (storedJob?.status === "completed" || storedJob?.status === "failed" || storedJob?.status === "cancelled") {
+      return;
+    }
+
+    if (storedJob) {
+      writeJobFile(workspaceRoot, jobId, {
+        ...storedJob,
+        pid
+      });
+    }
+    applyJobPatch(state, {
+      id: jobId,
+      pid
+    });
+  });
+}
+
+function markQueuedTaskSpawnFailed(workspaceRoot, jobId, logFile, error) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const completedAt = nowIso();
+  appendLogLine(logFile, `Failed to start background task worker: ${errorMessage}`);
+
+  updateState(workspaceRoot, (state) => {
+    const storedJob = readStoredJob(workspaceRoot, jobId);
+    const failedJob = {
+      ...(storedJob ?? { id: jobId }),
+      status: "failed",
+      phase: "failed",
+      pid: null,
+      completedAt,
+      errorMessage
+    };
+    writeJobFile(workspaceRoot, jobId, failedJob);
+    applyJobPatch(state, {
+      id: jobId,
+      status: "failed",
+      phase: "failed",
+      pid: null,
+      completedAt,
+      errorMessage
+    });
+  });
+}
+
 function enqueueBackgroundTask(cwd, job, request) {
   const { logFile } = createTrackedProgress(job);
   appendLogLine(logFile, "Queued for background execution.");
 
-  const child = spawnDetachedTaskWorker(cwd, job.id);
   const queuedRecord = {
     ...job,
     status: "queued",
     phase: "queued",
-    pid: child.pid ?? null,
+    pid: null,
     logFile,
     request
   };
   writeJobFile(job.workspaceRoot, job.id, queuedRecord);
   upsertJob(job.workspaceRoot, queuedRecord);
+
+  let child;
+  try {
+    child = spawnDetachedTaskWorker(cwd, job.id);
+  } catch (error) {
+    markQueuedTaskSpawnFailed(job.workspaceRoot, job.id, logFile, error);
+    throw error;
+  }
+  child.once("error", (error) => {
+    markQueuedTaskSpawnFailed(job.workspaceRoot, job.id, logFile, error);
+  });
+  markQueuedTaskSpawned(job.workspaceRoot, job.id, child.pid ?? null);
 
   return {
     payload: {
@@ -691,7 +753,7 @@ async function handleReview(argv) {
 async function handleTask(argv) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["model", "effort", "cwd", "prompt-file"],
-    booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background"],
+    booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background", "stop-review"],
     aliasMap: {
       m: "model"
     }
@@ -709,9 +771,11 @@ async function handleTask(argv) {
     throw new Error("Choose either --resume/--resume-last or --fresh.");
   }
   const write = Boolean(options.write);
+  const stopReview = Boolean(options["stop-review"]);
   const taskMetadata = buildTaskRunMetadata({
     prompt,
-    resumeLast
+    resumeLast,
+    stopReview
   });
 
   if (options.background) {
@@ -730,6 +794,7 @@ async function handleTask(argv) {
       prompt,
       write,
       resumeLast,
+      stopReview,
       jobId: job.id
     });
     const { payload } = enqueueBackgroundTask(cwd, job, request);
@@ -748,6 +813,7 @@ async function handleTask(argv) {
         prompt,
         write,
         resumeLast,
+        stopReview,
         jobId: job.id,
         onProgress: progress
       }),

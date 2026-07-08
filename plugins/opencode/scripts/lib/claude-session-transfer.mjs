@@ -222,7 +222,7 @@ export function buildOpenCodeImportDocumentFromClaudeJsonl(jsonl, options = {}) 
   };
   const messages = [];
   let firstUserText = "";
-  let latestUserMessageID = null;
+  let lastMessageID = null;
 
   for (const entry of parseClaudeJsonl(jsonl)) {
     // Skip sidechain/subagent turns — Claude Code interleaves them into the same
@@ -245,7 +245,7 @@ export function buildOpenCodeImportDocumentFromClaudeJsonl(jsonl, options = {}) 
     // turns that precede the first user message (a null parentID fails the whole
     // import). Real Claude transcripts open with a user turn, so this only skips
     // orphaned leading assistant content.
-    if (role === "assistant" && !latestUserMessageID) {
+    if (role === "assistant" && !lastMessageID) {
       continue;
     }
 
@@ -257,9 +257,10 @@ export function buildOpenCodeImportDocumentFromClaudeJsonl(jsonl, options = {}) 
         firstUserText = text;
       }
       messages.push(buildUserMessage(text, time, sessionID, messageID, partID));
-      latestUserMessageID = messageID;
+      lastMessageID = messageID;
     } else {
-      messages.push(buildAssistantMessage(text, time, sessionID, messageID, partID, latestUserMessageID, cwd));
+      messages.push(buildAssistantMessage(text, time, sessionID, messageID, partID, lastMessageID, cwd));
+      lastMessageID = messageID;
     }
   }
 

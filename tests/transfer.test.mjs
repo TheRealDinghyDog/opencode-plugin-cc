@@ -146,6 +146,26 @@ test("converter skips sidechain/subagent entries", () => {
   assert.equal(doc.messages[1].info.parentID, doc.messages[0].info.id);
 });
 
+test("converter threads consecutive assistant messages after the previous message", () => {
+  const jsonl = [
+    JSON.stringify({ message: { role: "user", content: "main user turn" } }),
+    JSON.stringify({ message: { role: "assistant", content: [{ type: "text", text: "first assistant reply" }] } }),
+    JSON.stringify({ message: { role: "assistant", content: [{ type: "text", text: "second assistant reply" }] } })
+  ].join("\n");
+
+  const doc = buildOpenCodeImportDocumentFromClaudeJsonl(jsonl, {
+    cwd: "/tmp/project",
+    version: "t",
+    idFactory: sequentialIds(),
+    fallbackTime: 1000
+  });
+
+  assert.deepEqual(doc.messages.map((message) => message.info.role), ["user", "assistant", "assistant"]);
+  assert.equal(doc.messages[1].info.parentID, doc.messages[0].info.id);
+  assert.equal(doc.messages[2].info.parentID, doc.messages[1].info.id);
+  assert.equal(typeof doc.messages[2].info.parentID, "string");
+});
+
 test("transfer imports a Claude transcript and prints an OpenCode resume command", () => {
   const repo = makeTempDir();
   const home = makeTempDir("opencode-plugin-home-");
