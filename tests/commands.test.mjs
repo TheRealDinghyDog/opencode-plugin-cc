@@ -76,3 +76,8 @@ test("hooks keep session-end cleanup and stop gating enabled", () => {
   assert.match(source, /session-lifecycle-hook\.mjs/);
   assert.match(source, /OpenCode Companion/);
 });
+
+test("stop review hook passes an explicit task classification flag", () => {
+  const source = read("scripts/stop-review-gate-hook.mjs");
+  assert.match(source, /"task", "--json", "--stop-review", prompt/);
+});
