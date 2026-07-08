@@ -235,6 +235,27 @@ function extractMessageParts(value) {
   return Array.isArray(parts) ? parts : [];
 }
 
+function getMessagesArray(response) {
+  if (Array.isArray(response)) {
+    return response;
+  }
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+  if (Array.isArray(response?.messages)) {
+    return response.messages;
+  }
+  return [];
+}
+
+function isAssistantMessage(message) {
+  return (message?.info?.role ?? message?.role) === "assistant";
+}
+
+function extractMessageId(message) {
+  return message?.info?.id ?? message?.id ?? null;
+}
+
 function textFromContent(content) {
   if (typeof content === "string") {
     return content;
@@ -340,12 +361,16 @@ function createTurnCaptureState(sessionID, options = {}) {
     completion,
     resolveCompletion,
     rejectCompletion,
+    priorAssistantIds: new Set(options.priorAssistantIds ?? []),
     finalMessage: "",
     structuredOutput: null,
     reasoningSummary: [],
     touchedFiles: new Set(),
     commandExecutions: [],
     error: null,
+    streamError: null,
+    responseError: null,
+    recoveryError: null,
     response: null,
     fallbackTimer: null,
     onProgress: options.onProgress ?? null,
@@ -581,15 +606,20 @@ async function applyOpenCodeEvent(client, state, event, meta = {}) {
 async function recoverFinalMessageFromServer(client, state, options = {}) {
   try {
     const raw = await client.listMessages(state.sessionID, { signal: options.signal });
-    const messages = Array.isArray(raw) ? raw : raw?.data ?? raw?.messages ?? [];
-    const assistant = messages
-      .filter((message) => (message?.info?.role ?? message?.role) === "assistant")
-      .pop();
+    const messages = getMessagesArray(raw).filter(isAssistantMessage);
+    const assistant = state.messageID
+      ? messages.find((message) => extractMessageId(message) === state.messageID)
+      : messages
+          .filter((message) => {
+            const messageID = extractMessageId(message);
+            return messageID && !state.priorAssistantIds.has(messageID);
+          })
+          .pop();
     if (!assistant) {
       return false;
     }
-    state.messageID = assistant?.info?.id ?? assistant?.id ?? state.messageID;
-    applyMessageParts(state, assistant?.parts ?? [], state.sessionID);
+    state.messageID = extractMessageId(assistant) ?? state.messageID;
+    applyMessageParts(state, extractMessageParts(assistant), state.sessionID);
     if (state.finalMessage || state.structuredOutput != null) {
       state.recovered = true;
       completeTurn(state);
@@ -599,6 +629,20 @@ async function recoverFinalMessageFromServer(client, state, options = {}) {
   } catch (error) {
     state.recoveryError = error;
     return false;
+  }
+}
+
+async function snapshotPriorAssistantIds(client, state, options = {}) {
+  try {
+    const raw = await client.listMessages(state.sessionID, { signal: options.signal });
+    state.priorAssistantIds = new Set(
+      getMessagesArray(raw)
+        .filter(isAssistantMessage)
+        .map(extractMessageId)
+        .filter(Boolean)
+    );
+  } catch {
+    state.priorAssistantIds = new Set();
   }
 }
 
@@ -639,6 +683,8 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
         throw new Error("Timed out waiting for OpenCode event stream.");
       })
     ]);
+
+    await snapshotPriorAssistantIds(client, state, { signal: eventAbort.signal });
 
     // Send the prompt. The synchronous /message endpoint keeps this request open
     // for the whole turn, so on long turns it can hit the client fetch timeout and
@@ -684,8 +730,9 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
     }
 
     // Nothing captured and no genuine error => surface the underlying cause.
-    if (!state.error && !state.completed && !state.finalMessage && state.structuredOutput == null) {
+    if (!state.error && !state.finalMessage && state.structuredOutput == null) {
       state.error =
+        state.recoveryError ??
         state.responseError ??
         state.streamError ??
         new Error(

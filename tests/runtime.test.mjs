@@ -308,6 +308,30 @@ test("task succeeds when the message transport drops after session.idle (issue #
   }
 });
 
+test("task succeeds when the message transport drops before completion events (issue #2)", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  // Reproduces the real ordering where the held-open /message POST fails first,
+  // then the event stream later delivers the final message and session.idle.
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "delayed-events" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--json", "long running task"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 0);
+    assert.match(payload.rawOutput, /Handled the requested task/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
 test("task recovers the final message over HTTP when only session.idle arrives (issue #2)", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
@@ -327,6 +351,64 @@ test("task recovers the final message over HTTP when only session.idle arrives (
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.status, 0);
     assert.match(payload.rawOutput, /Handled the requested task/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("task fails when completion has no recoverable current-turn message (issue #2)", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(
+    path.join(binDir, "fake-opencode-state.json"),
+    JSON.stringify(
+      {
+        serverStarts: 0,
+        nextSessionId: 2,
+        nextMessageId: 2,
+        sessions: [
+          {
+            id: "ses_existing",
+            directory: repo,
+            title: "OpenCode Companion Task: prior fixture task",
+            agent: "plan",
+            model: null,
+            permission: []
+          }
+        ],
+        messages: [],
+        responses: [
+          {
+            sessionID: "ses_existing",
+            info: { id: "msg_1", role: "assistant", sessionID: "ses_existing" },
+            parts: [{ type: "text", text: "Prior stale assistant message." }]
+          }
+        ],
+        imports: [],
+        permissions: [],
+        lastAbort: null
+      },
+      null,
+      2
+    )
+  );
+  const env = buildTestEnv(binDir, {
+    FAKE_OPENCODE_MESSAGE_FAIL: "empty-recovery",
+    OPENCODE_COMPANION_SESSION_ID: ""
+  });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--json", "--resume-last", "follow up with no output"], {
+      cwd: repo,
+      env
+    });
+
+    assert.notEqual(result.status, 0, result.stdout);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 1);
+    assert.equal(payload.rawOutput, "");
   } finally {
     cleanupServer(repo, env);
   }

@@ -195,6 +195,13 @@ async function handleMessage(req, res, sessionID) {
     ? "Resumed the prior OpenCode run.\\nFollow-up prompt accepted."
     : "Handled the requested task.\\nTask prompt accepted.";
   const parts = structuredOutputParts(body) || [{ type: "text", text: finalText }];
+  const failMode = process.env.FAKE_OPENCODE_MESSAGE_FAIL;
+  if (failMode === "empty-recovery") {
+    emit({ type: "session.idle", sessionID });
+    res.destroy();
+    return;
+  }
+
   const finalState = loadState();
   finalState.lastResponseParts = parts;
   finalState.responses = finalState.responses || [];
@@ -204,7 +211,16 @@ async function handleMessage(req, res, sessionID) {
   // stream but drop the /message HTTP response mid-flight (like undici timing
   // out the held-open POST). "recover": additionally withhold message.updated so
   // the client must re-fetch the finished message via GET /session/:id/message.
-  const failMode = process.env.FAKE_OPENCODE_MESSAGE_FAIL;
+  // "delayed-events" drops the POST before completion events arrive, matching
+  // the real failure ordering seen in issue #2 review.
+  if (failMode === "delayed-events") {
+    res.destroy();
+    setTimeout(() => {
+      emit({ type: "message.updated", sessionID, message: { id: messageID, parts } });
+      emit({ type: "session.idle", sessionID });
+    }, 25);
+    return;
+  }
   if (failMode !== "recover") {
     emit({ type: "message.updated", sessionID, message: { id: messageID, parts } });
   }
