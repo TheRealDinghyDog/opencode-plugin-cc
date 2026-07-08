@@ -216,6 +216,18 @@ function handleImportCli(filePath) {
     process.exit(1);
   }
   const document = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  // Mirror the real importer's strict validation for the constraints confirmed
+  // against a live server, so a converter schema regression fails the e2e test.
+  if (!document.info || typeof document.info.slug !== "string" || !document.info.slug) {
+    console.error("import validation failed: missing session slug");
+    process.exit(1);
+  }
+  for (const message of document.messages || []) {
+    if (message.info && message.info.role === "assistant" && typeof message.info.parentID !== "string") {
+      console.error("import validation failed: assistant parentID must be a string");
+      process.exit(1);
+    }
+  }
   const state = loadState();
   const sessionID = "ses_" + state.nextSessionId++;
   const session = {

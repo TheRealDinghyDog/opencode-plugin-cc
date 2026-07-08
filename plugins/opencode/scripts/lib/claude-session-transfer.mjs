@@ -225,6 +225,12 @@ export function buildOpenCodeImportDocumentFromClaudeJsonl(jsonl, options = {}) 
   let latestUserMessageID = null;
 
   for (const entry of parseClaudeJsonl(jsonl)) {
+    // Skip sidechain/subagent turns — Claude Code interleaves them into the same
+    // transcript, and importing them would pollute the main conversation and
+    // mis-thread assistant `parentID`s onto subagent messages.
+    if (entry?.isSidechain === true) {
+      continue;
+    }
     const role = entry?.message?.role;
     if (role !== "user" && role !== "assistant") {
       continue;

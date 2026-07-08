@@ -126,6 +126,26 @@ test("converter drops assistant turns before the first user message (no null par
   }
 });
 
+test("converter skips sidechain/subagent entries", () => {
+  const jsonl = [
+    JSON.stringify({ message: { role: "user", content: "main user turn" } }),
+    JSON.stringify({ isSidechain: true, message: { role: "user", content: "subagent prompt" } }),
+    JSON.stringify({ isSidechain: true, message: { role: "assistant", content: [{ type: "text", text: "subagent reply" }] } }),
+    JSON.stringify({ message: { role: "assistant", content: [{ type: "text", text: "main assistant reply" }] } })
+  ].join("\n");
+
+  const doc = buildOpenCodeImportDocumentFromClaudeJsonl(jsonl, {
+    cwd: "/tmp/project",
+    version: "t",
+    idFactory: sequentialIds(),
+    fallbackTime: 1000
+  });
+
+  assert.deepEqual(doc.messages.map((message) => message.parts[0].text), ["main user turn", "main assistant reply"]);
+  // The main assistant must thread to the MAIN user, not the skipped sidechain user.
+  assert.equal(doc.messages[1].info.parentID, doc.messages[0].info.id);
+});
+
 test("transfer imports a Claude transcript and prints an OpenCode resume command", () => {
   const repo = makeTempDir();
   const home = makeTempDir("opencode-plugin-home-");
