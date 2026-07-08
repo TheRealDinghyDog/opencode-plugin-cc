@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { runServerTurn } from "../plugins/opencode/scripts/lib/opencode.mjs";
-import { saveServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+import { loadServerSession, saveServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+import { resolveStateFile, saveState } from "../plugins/opencode/scripts/lib/state.mjs";
 import { buildEnv, installFakeOpencode, readFakeState, readServerBootCount } from "./fake-opencode-fixture.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 
@@ -15,6 +16,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN_ROOT = path.join(ROOT, "plugins", "opencode");
 const SCRIPT = path.join(PLUGIN_ROOT, "scripts", "opencode-companion.mjs");
 const SESSION_HOOK = path.join(PLUGIN_ROOT, "scripts", "session-lifecycle-hook.mjs");
+const STOP_HOOK = path.join(PLUGIN_ROOT, "scripts", "stop-review-gate-hook.mjs");
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {
@@ -92,6 +94,108 @@ function jsonResponse(value, status = 200) {
     headers: { "content-type": "application/json" }
   });
 }
+
+test("session end clears server session when job cleanup fails but teardown succeeds", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+  const sessionId = "sess-cleanup-throws";
+
+  await withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, async () => {
+    saveServerSession(workspace, {
+      url: "http://127.0.0.1:1",
+      pid: null,
+      pidFile: null,
+      logFile: null,
+      sessionDir: null,
+      external: false,
+      leases: []
+    });
+    fs.mkdirSync(resolveStateFile(workspace), { recursive: true });
+
+    const result = run("node", [SESSION_HOOK, "SessionEnd"], {
+      cwd: workspace,
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: pluginDataDir,
+        OPENCODE_COMPANION_SESSION_ID: sessionId
+      },
+      input: JSON.stringify({ cwd: workspace, session_id: sessionId })
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /OpenCode session job cleanup failed/);
+    assert.equal(loadServerSession(workspace), null);
+  });
+});
+
+test("session end leaves server session when teardown is skipped for active leases", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+  const timestamp = new Date().toISOString();
+
+  await withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, async () => {
+    saveServerSession(workspace, {
+      url: "http://127.0.0.1:1",
+      pid: null,
+      pidFile: null,
+      logFile: null,
+      sessionDir: null,
+      external: false,
+      leases: [
+        {
+          pid: process.pid,
+          token: "parent-test-lease",
+          createdAt: timestamp,
+          expiresAt: new Date(Date.now() + 60000).toISOString()
+        }
+      ]
+    });
+
+    const result = run("node", [SESSION_HOOK, "SessionEnd"], {
+      cwd: workspace,
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: pluginDataDir,
+        OPENCODE_COMPANION_SESSION_ID: "sess-active-lease"
+      },
+      input: JSON.stringify({ cwd: workspace, session_id: "sess-active-lease" })
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(loadServerSession(workspace).url, "http://127.0.0.1:1");
+  });
+});
+
+test("stop review gate tears down a server left by a failed stop review task", { skip: LOCAL_LISTEN_SKIP }, async () => {
+  const workspace = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  const env = buildTestEnv(binDir, {
+    FAKE_OPENCODE_MESSAGE_FAIL: "empty-recovery"
+  });
+
+  await withProcessEnv({ CLAUDE_PLUGIN_DATA: env.CLAUDE_PLUGIN_DATA }, async () => {
+    saveState(workspace, {
+      version: 1,
+      config: { stopReviewGate: true },
+      jobs: []
+    });
+
+    const result = run("node", [STOP_HOOK], {
+      cwd: workspace,
+      env,
+      input: JSON.stringify({
+        cwd: workspace,
+        session_id: env.OPENCODE_COMPANION_SESSION_ID,
+        last_assistant_message: "Previous turn output."
+      })
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).decision, "block");
+    assert.equal(loadServerSession(workspace), null);
+  });
+});
 
 function installFailingCaptureFetch(createdSessionId = "ses_created") {
   const previousFetch = globalThis.fetch;

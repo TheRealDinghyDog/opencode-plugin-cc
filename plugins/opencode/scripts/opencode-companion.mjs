@@ -31,6 +31,7 @@ import {
   generateJobId,
   getConfig,
   listJobs,
+  resolveJobLogFile,
   setConfig,
   updateState,
   upsertJob,
@@ -1088,9 +1089,11 @@ async function handleCancel(argv) {
   const completedAt = nowIso();
   const cancelResult = cancelJobIfStillActive(workspaceRoot, currentJob, completedAt);
   if (cancelResult.cancelled) {
+    const cancelLogFile =
+      cancelResult.job.logFile ?? currentJob.logFile ?? job.logFile ?? resolveJobLogFile(workspaceRoot, cancelResult.job.id);
     if (interrupt.attempted) {
       appendLogLine(
-        cancelResult.job.logFile,
+        cancelLogFile,
         interrupt.interrupted
           ? `Requested OpenCode session abort for ${threadId}.`
           : `OpenCode session abort failed${interrupt.detail ? `: ${interrupt.detail}` : "."}`
@@ -1104,11 +1107,11 @@ async function handleCancel(argv) {
       });
     } catch (error) {
       appendLogLine(
-        cancelResult.job.logFile,
+        cancelLogFile,
         `OpenCode server teardown failed: ${error instanceof Error ? error.message : String(error)}`
       );
     }
-    appendLogLine(cancelResult.job.logFile, "Cancelled by user.");
+    appendLogLine(cancelLogFile, "Cancelled by user.");
   }
 
   const nextJob = cancelResult.job;
