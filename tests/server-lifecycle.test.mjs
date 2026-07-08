@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { isServerHealthy, loadServerSession, saveServerSession, teardownServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+import { ensureServer, isServerHealthy, loadServerSession, saveServerSession, teardownServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {
@@ -52,6 +52,49 @@ test(
   }
   }
 );
+
+test("ensureServer keeps a single lease for repeated calls from the same process", async () => {
+  const url = "http://127.0.0.1:1";
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  const previousFetch = globalThis.fetch;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  globalThis.fetch = async (requestUrl) => {
+    assert.equal(String(requestUrl), `${url}/global/health`);
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  try {
+    saveServerSession(workspace, {
+      url,
+      pid: 123456,
+      pidFile: null,
+      logFile: null,
+      sessionDir: null,
+      external: false
+    });
+
+    const first = await ensureServer(workspace);
+    const second = await ensureServer(workspace);
+    const stored = loadServerSession(workspace);
+
+    assert.equal(first.leases.length, 1);
+    assert.equal(second.leases.length, 1);
+    assert.equal(stored.leases.length, 1);
+    assert.equal(stored.leases[0].pid, process.pid);
+  } finally {
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+    globalThis.fetch = previousFetch;
+  }
+});
 
 test("teardownServerSession skips local teardown while a server lease is active", async () => {
   const workspace = makeTempDir();

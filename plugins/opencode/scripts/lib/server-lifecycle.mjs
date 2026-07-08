@@ -230,9 +230,10 @@ function hasActiveServerLeases(session) {
 
 function addServerLease(session, options = {}) {
   const pruned = pruneServerLeases(session);
+  const withoutSelf = pruned.leases.filter((lease) => Number(lease?.pid) !== process.pid);
   return {
     ...pruned,
-    leases: [...pruned.leases, createServerLease(options)]
+    leases: [...withoutSelf, createServerLease(options)]
   };
 }
 
