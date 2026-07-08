@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { buildOpenCodeImportDocumentFromClaudeJsonl } from "../plugins/opencode/scripts/lib/claude-session-transfer.mjs";
+import { importExternalAgentSession } from "../plugins/opencode/scripts/lib/opencode.mjs";
 import { buildEnv, installFakeOpencode, readFakeState } from "./fake-opencode-fixture.mjs";
 import { makeTempDir, run } from "./helpers.mjs";
 
@@ -203,4 +204,39 @@ test("transfer imports a Claude transcript and prints an OpenCode resume command
     "user",
     "assistant"
   ]);
+});
+
+test("importExternalAgentSession returns the imported session when temp cleanup fails", async () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+
+  const transcriptPath = path.join(repo, "session.jsonl");
+  fs.writeFileSync(transcriptPath, sampleClaudeJsonl(), "utf8");
+  const env = buildEnv(binDir);
+
+  const originalRmSync = fs.rmSync;
+  let cleanupTarget = null;
+  fs.rmSync = (target) => {
+    cleanupTarget = target;
+    throw new Error("simulated cleanup failure");
+  };
+
+  try {
+    const result = await importExternalAgentSession(repo, {
+      sourcePath: transcriptPath,
+      env,
+      idFactory: sequentialIds(),
+      fallbackTime: 1000
+    });
+
+    assert.match(result.threadId, /^ses_/);
+    assert.equal(result.resumeCommand, `opencode --session ${result.threadId}`);
+    assert.match(String(cleanupTarget), /opencode-transfer-/);
+  } finally {
+    fs.rmSync = originalRmSync;
+    if (cleanupTarget) {
+      fs.rmSync(cleanupTarget, { recursive: true, force: true });
+    }
+  }
 });

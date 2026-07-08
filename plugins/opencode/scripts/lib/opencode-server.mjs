@@ -170,6 +170,10 @@ export class OpencodeServerClient {
     });
   }
 
+  deleteSession(sessionID, options = {}) {
+    return this.request("DELETE", `/session/${encodePathSegment(sessionID)}`, { signal: options.signal });
+  }
+
   getConfig(options = {}) {
     return this.request("GET", "/config", { signal: options.signal });
   }

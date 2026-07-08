@@ -978,6 +978,7 @@ export async function runServerTurn(cwd, options = {}) {
     });
 
     let sessionID = options.resumeThreadId ?? options.resumeSessionId ?? null;
+    let createdSessionID = null;
 
     if (sessionID) {
       emitProgress(options.onProgress, `Resuming OpenCode session ${sessionID}.`, "starting", {
@@ -1000,33 +1001,46 @@ export async function runServerTurn(cwd, options = {}) {
       if (!sessionID) {
         throw new Error("OpenCode did not return a session id.");
       }
+      createdSessionID = sessionID;
       emitProgress(options.onProgress, `Session ready (${sessionID}).`, "starting", {
         threadId: sessionID,
         serverUrl: server.url
       });
     }
 
-    const turnState = await captureTurn(
-      client,
-      sessionID,
-      (signal) =>
-        client.sendMessage(
-          sessionID,
-          buildMessageParams(prompt, {
-            model: options.model,
-            variant: options.variant ?? options.effort ?? null,
-            outputSchema: options.outputSchema ?? null,
-            write,
-            agent
-          }),
-          { signal }
-        ),
-      {
-        onProgress: options.onProgress,
-        write,
-        turnTimeoutMs: options.turnTimeoutMs
+    let turnState;
+    try {
+      turnState = await captureTurn(
+        client,
+        sessionID,
+        (signal) =>
+          client.sendMessage(
+            sessionID,
+            buildMessageParams(prompt, {
+              model: options.model,
+              variant: options.variant ?? options.effort ?? null,
+              outputSchema: options.outputSchema ?? null,
+              write,
+              agent
+            }),
+            { signal }
+          ),
+        {
+          onProgress: options.onProgress,
+          write,
+          turnTimeoutMs: options.turnTimeoutMs
+        }
+      );
+    } catch (error) {
+      if (createdSessionID) {
+        try {
+          await client.deleteSession(createdSessionID);
+        } catch {
+          // Preserve the turn failure; session deletion is best-effort cleanup.
+        }
       }
-    );
+      throw error;
+    }
 
     const structured = turnState.structuredOutput;
     const finalMessage =
@@ -1135,7 +1149,11 @@ export async function importExternalAgentSession(cwd, options = {}) {
       resumeCommand: `opencode --session ${threadId}`
     };
   } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // Preserve the import result/error; temp-dir cleanup is best effort.
+    }
   }
 }
 
