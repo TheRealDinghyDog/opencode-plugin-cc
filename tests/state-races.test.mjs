@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -265,5 +266,45 @@ test("cancel tears down the shared server session when only dead leases remain",
 
     const storedJob = readJobFile(resolveJobFile(workspace, jobId));
     assert.equal(storedJob.status, "cancelled");
+  });
+});
+
+test("cancel writes a cancellation log when the job record has no logFile", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+
+  await withPluginData(pluginDataDir, async () => {
+    const jobId = "job-cancel-missing-log";
+    const timestamp = new Date().toISOString();
+    const runningJob = {
+      id: jobId,
+      workspaceRoot: workspace,
+      jobClass: "task",
+      kind: "task",
+      status: "running",
+      phase: "running",
+      pid: null,
+      title: "Running task without log",
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    saveState(workspace, {
+      version: 1,
+      config: { stopReviewGate: false },
+      jobs: [runningJob]
+    });
+    writeJobFile(workspace, jobId, runningJob);
+
+    const result = run(process.execPath, [COMPANION, "cancel", jobId, "--cwd", workspace, "--json"], {
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: pluginDataDir,
+        OPENCODE_COMPANION_SESSION_ID: ""
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).cancelled, true);
+    assert.match(fs.readFileSync(resolveJobLogFile(workspace, jobId), "utf8"), /Cancelled by user\./);
   });
 });

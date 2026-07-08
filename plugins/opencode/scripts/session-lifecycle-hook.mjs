@@ -91,7 +91,13 @@ async function handleSessionEnd(input) {
         }
       : null);
 
-  cleanupSessionJobs(cwd, input.session_id || process.env[SESSION_ID_ENV]);
+  try {
+    cleanupSessionJobs(cwd, input.session_id || process.env[SESSION_ID_ENV]);
+  } catch (error) {
+    process.stderr.write(
+      `OpenCode session job cleanup failed: ${error instanceof Error ? error.message : String(error)}\n`
+    );
+  }
   const teardown = await teardownServerSession({
     cwd,
     url: serverSession?.url ?? null,

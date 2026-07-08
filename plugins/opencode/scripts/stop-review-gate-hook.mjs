@@ -11,6 +11,7 @@ import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import { getConfig, listJobs } from "./lib/state.mjs";
 import { sortJobsNewestFirst } from "./lib/job-control.mjs";
 import { SESSION_ID_ENV } from "./lib/tracked-jobs.mjs";
+import { teardownServerSession } from "./lib/server-lifecycle.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 
 const STOP_REVIEW_TIMEOUT_MS = 15 * 60 * 1000;
@@ -95,7 +96,15 @@ function parseStopReviewOutput(rawOutput) {
   };
 }
 
-function runStopReview(cwd, input = {}) {
+async function cleanupStopReviewServer(cwd) {
+  try {
+    await teardownServerSession({ cwd });
+  } catch {
+    // Best-effort cleanup after a killed stop-review task.
+  }
+}
+
+async function runStopReview(cwd, input = {}) {
   const scriptPath = path.join(SCRIPT_DIR, "opencode-companion.mjs");
   const prompt = buildStopReviewPrompt(input);
   const childEnv = {
@@ -110,6 +119,7 @@ function runStopReview(cwd, input = {}) {
   });
 
   if (result.error?.code === "ETIMEDOUT") {
+    await cleanupStopReviewServer(cwd);
     return {
       ok: false,
       reason:
@@ -117,7 +127,8 @@ function runStopReview(cwd, input = {}) {
     };
   }
 
-  if (result.status !== 0) {
+  if (result.status !== 0 || result.signal) {
+    await cleanupStopReviewServer(cwd);
     const detail = String(result.stderr || result.stdout || "").trim();
     return {
       ok: false,
@@ -139,7 +150,7 @@ function runStopReview(cwd, input = {}) {
   }
 }
 
-function main() {
+async function main() {
   const input = readHookInput();
   const cwd = input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
@@ -163,7 +174,7 @@ function main() {
     return;
   }
 
-  const review = runStopReview(cwd, input);
+  const review = await runStopReview(cwd, input);
   if (!review.ok) {
     emitDecision({
       decision: "block",
@@ -176,7 +187,7 @@ function main() {
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`${message}\n`);

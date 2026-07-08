@@ -231,9 +231,23 @@ export class OpencodeServerClient {
       throw new Error("OpenCode event stream did not include a response body.");
     }
 
-    options.onOpen?.();
-
-    const reader = response.body.getReader();
+    let reader;
+    try {
+      options.onOpen?.();
+      reader = response.body.getReader();
+    } catch (error) {
+      if (reader) {
+        await reader.cancel().catch(() => {});
+        try {
+          reader.releaseLock();
+        } catch {
+          // Preserve the original onOpen/getReader failure.
+        }
+      } else {
+        await response.body.cancel().catch(() => {});
+      }
+      throw error;
+    }
     const decoder = new TextDecoder();
     let buffer = "";
 
