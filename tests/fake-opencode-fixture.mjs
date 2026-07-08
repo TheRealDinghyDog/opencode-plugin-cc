@@ -47,6 +47,7 @@ function loadState() {
       nextMessageId: 1,
       sessions: [],
       messages: [],
+      imports: [],
       permissions: [],
       lastAbort: null
     };
@@ -209,6 +210,35 @@ function handleSessionListCli() {
   }
 }
 
+function handleImportCli(filePath) {
+  if (!filePath) {
+    console.error("missing import file");
+    process.exit(1);
+  }
+  const document = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const state = loadState();
+  const sessionID = "ses_" + state.nextSessionId++;
+  const session = {
+    id: sessionID,
+    directory: document.info && document.info.directory || process.cwd(),
+    title: document.info && document.info.title || null,
+    agent: document.info && document.info.agent || null,
+    model: document.info && document.info.model || null,
+    imported: true
+  };
+  const record = {
+    sourcePath: path.resolve(filePath),
+    sessionID,
+    document
+  };
+  state.sessions.unshift(session);
+  state.imports = state.imports || [];
+  state.imports.push(record);
+  state.lastImport = record;
+  saveState(state);
+  console.log("Imported session: " + sessionID);
+}
+
 const args = process.argv.slice(2);
 if (args[0] === "--version") {
   console.log("opencode 1.17.10-test");
@@ -220,6 +250,10 @@ if (args[0] === "serve" && args.includes("--help")) {
 }
 if (args[0] === "session" && args[1] === "list") {
   handleSessionListCli();
+  process.exit(0);
+}
+if (args[0] === "import") {
+  handleImportCli(args[1]);
   process.exit(0);
 }
 if (args[0] !== "serve") {

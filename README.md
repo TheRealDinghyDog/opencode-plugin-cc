@@ -160,9 +160,7 @@ Ask OpenCode to redesign the database connection to be more resilient.
 
 ### `/opencode:transfer`
 
-Transfer is planned for the next phase of the OpenCode port. The command is present but currently reports that transfer is not implemented in Phase 1.
-
-Once implemented, use it when you started a debugging or implementation conversation in Claude Code and want to continue that same context directly in OpenCode.
+Transfer imports the current Claude Code JSONL transcript into a resumable OpenCode session with visible user and assistant turn history. Use it when you started a debugging or implementation conversation in Claude Code and want to continue that same context directly in OpenCode.
 
 Examples:
 

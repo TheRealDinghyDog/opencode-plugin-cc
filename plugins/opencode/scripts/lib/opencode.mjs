@@ -1,7 +1,11 @@
-import { readJsonFile } from "./fs.mjs";
+import fs from "node:fs";
+import path from "node:path";
+
+import { buildOpenCodeImportDocumentFromClaudeJsonl } from "./claude-session-transfer.mjs";
+import { createTempDir, readJsonFile, writeJsonFile } from "./fs.mjs";
 import { OpencodeServerClient } from "./opencode-server.mjs";
 import { SERVER_URL_ENV, ensureServer, loadServerSession } from "./server-lifecycle.mjs";
-import { binaryAvailable } from "./process.mjs";
+import { binaryAvailable, runCommandChecked } from "./process.mjs";
 
 const TASK_SESSION_PREFIX = "OpenCode Companion Task";
 const DEFAULT_CONTINUE_PROMPT =
@@ -948,8 +952,53 @@ export async function findLatestTaskThread(cwd) {
   });
 }
 
-export async function importExternalAgentSession() {
-  throw new Error("OpenCode transfer is not implemented in Phase 1.");
+function parseOpenCodeVersion(output) {
+  const tokens = String(output ?? "").trim().split(/\s+/).filter(Boolean);
+  return tokens[tokens.length - 1] ?? "unknown";
+}
+
+function parseImportedSessionId(output) {
+  return String(output ?? "").match(/Imported session:\s*(ses_[A-Za-z0-9]+)/)?.[1] ?? null;
+}
+
+export async function importExternalAgentSession(cwd, options = {}) {
+  if (!options.sourcePath) {
+    throw new Error("Missing Claude session source path for OpenCode transfer.");
+  }
+
+  const versionResult = runCommandChecked("opencode", ["--version"], {
+    cwd,
+    env: options.env
+  });
+  const version = parseOpenCodeVersion(versionResult.stdout || versionResult.stderr);
+  const transcript = fs.readFileSync(options.sourcePath, "utf8");
+  const document = buildOpenCodeImportDocumentFromClaudeJsonl(transcript, {
+    cwd,
+    version,
+    idFactory: options.idFactory,
+    fallbackTime: options.fallbackTime
+  });
+
+  const tempDir = createTempDir("opencode-transfer-");
+  const importPath = path.join(tempDir, "claude-session-import.json");
+  try {
+    writeJsonFile(importPath, document);
+    const importResult = runCommandChecked("opencode", ["import", importPath], {
+      cwd,
+      env: options.env,
+      maxBuffer: 1024 * 1024 * 10
+    });
+    const threadId = parseImportedSessionId(`${importResult.stdout}\n${importResult.stderr}`);
+    if (!threadId) {
+      throw new Error("OpenCode import completed without reporting an imported session id.");
+    }
+    return {
+      threadId,
+      resumeCommand: `opencode --session ${threadId}`
+    };
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 export function buildPersistentTaskThreadName(prompt) {

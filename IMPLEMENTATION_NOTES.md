@@ -35,7 +35,12 @@ Delegated to Codex, then a two-way review round (Claude reviewed Codex; Codex re
 - **Prompting skill** — `gpt-5-4-prompting` generalized to be provider-neutral; `codex-prompt-*.md` → `opencode-prompt-*.md`.
 - **Housekeeping** — dropped unused `typescript` devDep; `.codex/` gitignored; removed stale CI `npm run build`.
 
-## Deferred to Phase 3
-- **`transfer`** — still stubbed (`OpenCode transfer is not implemented in Phase 1`). Replay a Claude JSONL transcript into an OpenCode session via `noReply`.
+## Phase 3 — transfer (done)
+Delegated to Codex; live-verified end-to-end by Claude (real transcript → `opencode import` → resumable session with correct roles/order/text). `npm test` 35/35.
+- **`transfer`** — converts the Claude JSONL transcript to an OpenCode import document and runs `opencode import <file>`; returns the new `ses_...` id and prints `opencode --session <id>` for resume.
+- Non-text content (thinking/tool_use/tool_result/images) is skipped; timestamps are normalized to strictly increasing so order is preserved.
+- Edge-case fix (found via live testing): assistant turns before the first user message are dropped — `opencode import` rejects a null `parentID`.
+
+## Deferred
 - **Review sessions persist** — read-only review sessions are not deleted; acceptable, or delete for ephemeral parity.
 - **Optional** — regenerate TypeScript types from OpenCode's OpenAPI (`GET /doc`) to restore a type-check build.

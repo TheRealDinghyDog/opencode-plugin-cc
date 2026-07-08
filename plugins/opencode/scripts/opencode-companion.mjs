@@ -556,7 +556,7 @@ async function executeTransfer(cwd, options = {}) {
   const result = await importExternalAgentSession(cwd, { sourcePath });
   const payload = {
     threadId: result.threadId,
-    resumeCommand: `opencode --session ${result.threadId}`,
+    resumeCommand: result.resumeCommand ?? `opencode --session ${result.threadId}`,
     sourcePath,
     sessionId: path.basename(sourcePath, ".jsonl")
   };
