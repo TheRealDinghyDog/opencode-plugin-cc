@@ -197,9 +197,22 @@ async function handleMessage(req, res, sessionID) {
   const parts = structuredOutputParts(body) || [{ type: "text", text: finalText }];
   const finalState = loadState();
   finalState.lastResponseParts = parts;
+  finalState.responses = finalState.responses || [];
+  finalState.responses.push({ sessionID, info: { id: messageID, role: "assistant", sessionID }, parts });
   saveState(finalState);
-  emit({ type: "message.updated", sessionID, message: { id: messageID, parts } });
+  // Issue #2 regression hooks. "transport": deliver the turn over the event
+  // stream but drop the /message HTTP response mid-flight (like undici timing
+  // out the held-open POST). "recover": additionally withhold message.updated so
+  // the client must re-fetch the finished message via GET /session/:id/message.
+  const failMode = process.env.FAKE_OPENCODE_MESSAGE_FAIL;
+  if (failMode !== "recover") {
+    emit({ type: "message.updated", sessionID, message: { id: messageID, parts } });
+  }
   emit({ type: "session.idle", sessionID });
+  if (failMode === "transport" || failMode === "recover") {
+    res.destroy();
+    return;
+  }
   sendJson(res, { info: { id: messageID, sessionID }, parts });
 }
 
@@ -360,6 +373,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   const messageMatch = url.pathname.match(/^\\/session\\/([^/]+)\\/message$/);
+  if (req.method === "GET" && messageMatch) {
+    const sessionID = decodeURIComponent(messageMatch[1]);
+    const responses = (loadState().responses || []).filter((entry) => entry.sessionID === sessionID);
+    sendJson(res, responses);
+    return;
+  }
   if (req.method === "POST" && messageMatch) {
     await handleMessage(req, res, decodeURIComponent(messageMatch[1]));
     return;

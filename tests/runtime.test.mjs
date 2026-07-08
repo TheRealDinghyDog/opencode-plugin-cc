@@ -282,3 +282,52 @@ test("review captures json_schema output from StructuredOutput tool input", { sk
     cleanupServer(repo, env);
   }
 });
+
+test("task succeeds when the message transport drops after session.idle (issue #2)", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  // Simulates a slow turn where the held-open /message POST dies (client fetch
+  // timeout) but session.idle still arrives — the exact failure that reported a
+  // completed review as `fetch failed`.
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "transport" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--json", "long running task"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 0);
+    assert.match(payload.rawOutput, /Handled the requested task/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("task recovers the final message over HTTP when only session.idle arrives (issue #2)", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  // No message.updated event and a dropped POST response: the client must
+  // re-fetch the finished assistant message from the server to complete.
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "recover" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--json", "long running task"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 0);
+    assert.match(payload.rawOutput, /Handled the requested task/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
