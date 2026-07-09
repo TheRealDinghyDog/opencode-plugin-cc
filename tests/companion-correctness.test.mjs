@@ -9,7 +9,7 @@ import { makeTempDir, run } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = path.join(ROOT, "plugins", "opencode", "scripts", "opencode-companion.mjs");
-const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Claude turn.";
+const STOP_REVIEW_PROMPT_TEXT = "Run a stop-gate review of the previous Claude turn.";
 
 function withPluginData(pluginData, fn) {
   const previousPluginData = process.env.CLAUDE_PLUGIN_DATA;
@@ -125,7 +125,7 @@ test("task resume candidate ignores failed and cancelled task jobs", () => {
 });
 
 test("task prompt marker text does not classify as stop review without the explicit flag", () => {
-  const { result, jobs } = runTaskWithoutOpenCode([`${STOP_REVIEW_TASK_MARKER} Please handle this normal task.`]);
+  const { result, jobs } = runTaskWithoutOpenCode([`${STOP_REVIEW_PROMPT_TEXT} Please handle this normal task.`]);
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /OpenCode CLI is not installed/);
@@ -136,7 +136,7 @@ test("task prompt marker text does not classify as stop review without the expli
 });
 
 test("task stop review classification comes from the explicit flag", () => {
-  const { result, jobs } = runTaskWithoutOpenCode(["--stop-review", STOP_REVIEW_TASK_MARKER]);
+  const { result, jobs } = runTaskWithoutOpenCode(["--stop-review", STOP_REVIEW_PROMPT_TEXT]);
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /OpenCode CLI is not installed/);

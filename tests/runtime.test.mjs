@@ -6,11 +6,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { runServerTurn } from "../plugins/opencode/scripts/lib/opencode.mjs";
-import { loadServerSession, saveServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
-import { resolveStateFile, saveState } from "../plugins/opencode/scripts/lib/state.mjs";
+import { interruptServerTurn, runServerTurn } from "../plugins/opencode/scripts/lib/opencode.mjs";
+import { loadServerSession, saveServerSession, SERVER_URL_ENV } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+import { resolveJobLogFile, resolveStateFile, saveState, writeJobFile } from "../plugins/opencode/scripts/lib/state.mjs";
 import { buildEnv, installFakeOpencode, readFakeState, readServerBootCount } from "./fake-opencode-fixture.mjs";
-import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
+import { initGitRepo, makeTempDir, run, writeExecutable } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN_ROOT = path.join(ROOT, "plugins", "opencode");
@@ -94,6 +94,70 @@ function jsonResponse(value, status = 200) {
     headers: { "content-type": "application/json" }
   });
 }
+
+test("interruptServerTurn marks env-provided server urls as external", async () => {
+  const workspace = makeTempDir();
+  const binDir = makeTempDir();
+  writeExecutable(
+    path.join(binDir, "opencode"),
+    `#!/usr/bin/env node
+if (process.argv[2] === "--version") {
+  console.log("opencode test");
+  process.exit(0);
+}
+if (process.argv[2] === "serve" && process.argv.includes("--help")) {
+  console.log("serve help");
+  process.exit(0);
+}
+process.exit(1);
+`
+  );
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (requestUrl, options = {}) => {
+    const url = new URL(String(requestUrl));
+    calls.push({ method: options.method ?? "GET", pathname: url.pathname });
+    if (url.pathname === "/global/health") {
+      return jsonResponse({ ok: true });
+    }
+    if (url.pathname === "/session/ses_external/abort") {
+      return jsonResponse({ ok: true });
+    }
+    if (url.pathname === "/global/dispose") {
+      throw new Error("external server should not be disposed");
+    }
+    return jsonResponse({ error: "not found" }, 404);
+  };
+
+  try {
+    const result = await withProcessEnv(
+      {
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        [SERVER_URL_ENV]: "http://opencode.test"
+      },
+      () => interruptServerTurn(workspace, { threadId: "ses_external" })
+    );
+
+    assert.equal(result.interrupted, true);
+    assert.equal(result.serverUrl, "http://opencode.test");
+    assert.equal(result.serverExternal, true);
+    assert.deepEqual(calls, [
+      { method: "GET", pathname: "/global/health" },
+      { method: "POST", pathname: "/session/ses_external/abort" }
+    ]);
+
+    const missingThreadResult = await withProcessEnv(
+      {
+        [SERVER_URL_ENV]: "http://opencode.test/"
+      },
+      () => interruptServerTurn(workspace, { threadId: null, serverUrl: "http://opencode.test" })
+    );
+    assert.equal(missingThreadResult.attempted, false);
+    assert.equal(missingThreadResult.serverExternal, true);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
 
 test("session end clears server session when job cleanup fails but teardown succeeds", async () => {
   const workspace = makeTempDir();
@@ -193,6 +257,170 @@ test("stop review gate tears down a server left by a failed stop review task", {
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).decision, "block");
+    assert.equal(loadServerSession(workspace), null);
+  });
+});
+
+test("cancel tears down a server it starts to abort a job without a recorded server url", { skip: LOCAL_LISTEN_SKIP }, async () => {
+  const workspace = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  const env = buildTestEnv(binDir);
+
+  await withProcessEnv({ CLAUDE_PLUGIN_DATA: env.CLAUDE_PLUGIN_DATA }, async () => {
+    const jobId = "job-cancel-starts-server";
+    const timestamp = new Date().toISOString();
+    const logFile = resolveJobLogFile(workspace, jobId);
+    const runningJob = {
+      id: jobId,
+      workspaceRoot: workspace,
+      jobClass: "task",
+      kind: "task",
+      status: "running",
+      phase: "running",
+      pid: null,
+      title: "Running task",
+      threadId: "ses_cancel_without_server_url",
+      logFile,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    saveState(workspace, {
+      version: 1,
+      config: { stopReviewGate: false },
+      jobs: [runningJob]
+    });
+    writeJobFile(workspace, jobId, runningJob);
+
+    try {
+      const result = run("node", [SCRIPT, "cancel", jobId, "--cwd", workspace, "--json"], {
+        cwd: workspace,
+        env
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      const payload = JSON.parse(result.stdout);
+      assert.equal(payload.cancelled, true);
+      assert.equal(payload.turnInterruptAttempted, true);
+      assert.equal(payload.turnInterrupted, true);
+      assert.equal(readFakeState(binDir).lastAbort, "ses_cancel_without_server_url");
+      assert.equal(loadServerSession(workspace), null);
+    } finally {
+      cleanupServer(workspace, env);
+    }
+  });
+});
+
+test("cancel aborts but does not dispose an env-provided external server", async () => {
+  const workspace = makeTempDir();
+  const binDir = makeTempDir();
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+  const fetchLog = path.join(pluginDataDir, "external-fetch.jsonl");
+  const fetchPreload = path.join(pluginDataDir, "external-fetch-preload.mjs");
+  fs.writeFileSync(
+    fetchPreload,
+    `
+import fs from "node:fs";
+
+const logFile = process.env.TEST_FETCH_LOG;
+globalThis.fetch = async (requestUrl, options = {}) => {
+  const url = new URL(String(requestUrl));
+  const method = options.method ?? "GET";
+  fs.appendFileSync(logFile, JSON.stringify({ method, pathname: url.pathname }) + "\\n", "utf8");
+  if (method === "GET" && url.pathname === "/global/health") {
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  }
+  if (method === "POST" && url.pathname === "/session/ses_external_cancel/abort") {
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  }
+  if (method === "POST" && url.pathname === "/global/dispose") {
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  }
+  return new Response(JSON.stringify({ error: "not found" }), {
+    status: 404,
+    headers: { "content-type": "application/json" }
+  });
+};
+`,
+    "utf8"
+  );
+  writeExecutable(
+    path.join(binDir, "opencode"),
+    `#!/usr/bin/env node
+if (process.argv[2] === "--version") {
+  console.log("opencode test");
+  process.exit(0);
+}
+if (process.argv[2] === "serve" && process.argv.includes("--help")) {
+  console.log("serve help");
+  process.exit(0);
+}
+process.exit(1);
+`
+  );
+
+  await withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, async () => {
+    const jobId = "job-cancel-external-server";
+    const timestamp = new Date().toISOString();
+    const logFile = resolveJobLogFile(workspace, jobId);
+    const runningJob = {
+      id: jobId,
+      workspaceRoot: workspace,
+      jobClass: "task",
+      kind: "task",
+      status: "running",
+      phase: "running",
+      pid: null,
+      title: "Running external task",
+      threadId: "ses_external_cancel",
+      logFile,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    saveState(workspace, {
+      version: 1,
+      config: { stopReviewGate: false },
+      jobs: [runningJob]
+    });
+    writeJobFile(workspace, jobId, runningJob);
+
+    const result = run(process.execPath, ["--import", fetchPreload, SCRIPT, "cancel", jobId, "--cwd", workspace, "--json"], {
+      cwd: workspace,
+      env: {
+        ...process.env,
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        CLAUDE_PLUGIN_DATA: pluginDataDir,
+        OPENCODE_COMPANION_SESSION_ID: "sess-current",
+        TEST_FETCH_LOG: fetchLog,
+        [SERVER_URL_ENV]: "http://opencode.test"
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.cancelled, true);
+    assert.equal(payload.turnInterruptAttempted, true);
+    assert.equal(payload.turnInterrupted, true);
+
+    const calls = fs
+      .readFileSync(fetchLog, "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(calls, [
+      { method: "GET", pathname: "/global/health" },
+      { method: "POST", pathname: "/session/ses_external_cancel/abort" }
+    ]);
     assert.equal(loadServerSession(workspace), null);
   });
 });

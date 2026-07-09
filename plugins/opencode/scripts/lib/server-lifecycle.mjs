@@ -228,6 +228,15 @@ function hasActiveServerLeases(session) {
   return Array.isArray(session?.leases) && session.leases.some((lease) => isLeaseActive(lease));
 }
 
+function removeServerLeaseForPid(session, pid) {
+  return {
+    ...session,
+    leases: Array.isArray(session?.leases)
+      ? session.leases.filter((lease) => Number(lease?.pid) !== pid)
+      : []
+  };
+}
+
 function addServerLease(session, options = {}) {
   const pruned = pruneServerLeases(session);
   const withoutSelf = pruned.leases.filter((lease) => Number(lease?.pid) !== process.pid);
@@ -368,8 +377,16 @@ export async function ensureServer(cwd, options = {}) {
 
     const staleExisting = loadServerSession(cwd);
     if (staleExisting) {
+      const { url, pidFile, logFile, sessionDir, pid, external } = staleExisting;
+      // The server lock is already held here; intentionally omit cwd so teardown
+      // uses the unlocked path even if the persisted session schema grows.
       await teardownServerSession({
-        ...staleExisting,
+        url,
+        pidFile,
+        logFile,
+        sessionDir,
+        pid,
+        external,
         killProcess: options.killProcess ?? null
       });
       clearServerSession(cwd);
@@ -467,6 +484,7 @@ async function teardownServerSessionUnlocked({
 export async function teardownServerSession({
   cwd = null,
   force = false,
+  ignoreCurrentProcessLease = false,
   url = null,
   pidFile = null,
   logFile = null,
@@ -495,8 +513,9 @@ export async function teardownServerSession({
     const session = current && (!requestedUrl || currentUrl === requestedUrl) ? current : null;
     if (session && !force) {
       const pruned = pruneServerLeases(session);
-      if (hasActiveServerLeases(pruned)) {
-        saveServerSession(cwd, pruned);
+      const leaseChecked = ignoreCurrentProcessLease ? removeServerLeaseForPid(pruned, process.pid) : pruned;
+      if (hasActiveServerLeases(leaseChecked)) {
+        saveServerSession(cwd, leaseChecked);
         return { skipped: true, reason: "active-leases" };
       }
     }

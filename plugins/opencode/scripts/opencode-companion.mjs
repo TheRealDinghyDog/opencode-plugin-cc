@@ -24,7 +24,7 @@ import {
 import { resolveClaudeSessionPath } from "./lib/claude-session-transfer.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
-import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
+import { binaryAvailable, terminateTaskWorkerProcessTree } from "./lib/process.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import {
   applyJobPatch,
@@ -53,6 +53,7 @@ import {
   createJobProgressUpdater,
   createJobRecord,
   createProgressReporter,
+  isTerminalStatus,
   nowIso,
   runTrackedJob,
   SESSION_ID_ENV
@@ -961,16 +962,13 @@ function handleTaskResumeCandidate(argv) {
   outputCommandResult(payload, rendered, options.json);
 }
 
-function isCompletionTerminalStatus(status) {
-  return status === "completed" || status === "failed";
-}
-
 function terminalJobIndexPatch(job) {
+  const fallbackPhase = job.status === "completed" ? "done" : job.status === "cancelled" ? "cancelled" : "failed";
   return Object.fromEntries(
     Object.entries({
       id: job.id,
       status: job.status,
-      phase: job.phase ?? (job.status === "completed" ? "done" : "failed"),
+      phase: job.phase ?? fallbackPhase,
       pid: null,
       threadId: job.threadId,
       turnId: job.turnId,
@@ -1019,7 +1017,7 @@ function cancelJobIfStillActive(workspaceRoot, job, completedAt) {
       ...(storedJob ?? {})
     };
 
-    if (isCompletionTerminalStatus(currentJob.status)) {
+    if (isTerminalStatus(currentJob.status)) {
       applyJobPatch(state, terminalJobIndexPatch(currentJob));
       nextJob = {
         ...currentJob,
@@ -1066,7 +1064,7 @@ async function handleCancel(argv) {
   const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { env: process.env });
   const currentJob = readCurrentCancelJob(workspaceRoot, job);
 
-  if (isCompletionTerminalStatus(currentJob.status)) {
+  if (isTerminalStatus(currentJob.status)) {
     const syncedJob = syncTerminalJobIndex(workspaceRoot, currentJob);
     const payload = {
       jobId: syncedJob.id,
@@ -1082,10 +1080,9 @@ async function handleCancel(argv) {
   }
 
   const threadId = currentJob.threadId ?? null;
-  const turnId = currentJob.turnId ?? null;
   const serverUrl = currentJob.serverUrl ?? null;
 
-  const interrupt = await interruptServerTurn(cwd, { threadId, turnId, serverUrl });
+  const interrupt = await interruptServerTurn(cwd, { threadId, serverUrl });
   const completedAt = nowIso();
   const cancelResult = cancelJobIfStillActive(workspaceRoot, currentJob, completedAt);
   if (cancelResult.cancelled) {
@@ -1099,12 +1096,21 @@ async function handleCancel(argv) {
           : `OpenCode session abort failed${interrupt.detail ? `: ${interrupt.detail}` : "."}`
       );
     }
-    terminateProcessTree(currentJob.pid ?? Number.NaN);
+    const termination = terminateTaskWorkerProcessTree(currentJob.pid ?? Number.NaN, {
+      jobId: currentJob.id
+    });
+    if (termination.reason === "identity-mismatch" || termination.reason === "identity-unverified") {
+      appendLogLine(cancelLogFile, `Skipped worker process kill: ${termination.reason}.`);
+    }
     try {
-      await teardownServerSession({
-        cwd: workspaceRoot,
-        ...(serverUrl ? { url: serverUrl } : {})
-      });
+      const teardownServerUrl = interrupt.serverUrl ?? serverUrl;
+      if (!interrupt.serverExternal) {
+        await teardownServerSession({
+          cwd: workspaceRoot,
+          ignoreCurrentProcessLease: Boolean(interrupt.serverUrl && !serverUrl),
+          ...(teardownServerUrl ? { url: teardownServerUrl } : {})
+        });
+      }
     } catch (error) {
       appendLogLine(
         cancelLogFile,

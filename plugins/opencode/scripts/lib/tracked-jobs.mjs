@@ -148,7 +148,7 @@ function currentStoredStatus(stateJob, storedJob) {
   return storedJob?.status ?? stateJob?.status ?? null;
 }
 
-function isTerminalStatus(status) {
+export function isTerminalStatus(status) {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 

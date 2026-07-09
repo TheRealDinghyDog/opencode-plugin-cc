@@ -206,6 +206,64 @@ test("cancel does not clobber a completed stored job when the state index is sta
   });
 });
 
+test("cancel treats a cancelled stored job as terminal when the state index is stale active", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+
+  await withPluginData(pluginDataDir, async () => {
+    const jobId = "job-cancelled-on-disk";
+    const timestamp = new Date().toISOString();
+    const logFile = resolveJobLogFile(workspace, jobId);
+    saveState(workspace, {
+      version: 1,
+      config: { stopReviewGate: false },
+      jobs: [
+        {
+          id: jobId,
+          status: "running",
+          phase: "running",
+          pid: null,
+          title: "Cancelled on disk",
+          logFile,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        }
+      ]
+    });
+    writeJobFile(workspace, jobId, {
+      id: jobId,
+      workspaceRoot: workspace,
+      status: "cancelled",
+      phase: "cancelled",
+      pid: null,
+      title: "Cancelled on disk",
+      logFile,
+      completedAt: timestamp,
+      cancelledAt: timestamp,
+      errorMessage: "Already cancelled."
+    });
+
+    const result = run(process.execPath, [COMPANION, "cancel", jobId, "--cwd", workspace, "--json"], {
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: pluginDataDir
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, "cancelled");
+    assert.equal(payload.cancelled, false);
+    assert.equal(payload.turnInterruptAttempted, false);
+
+    const storedJob = readJobFile(resolveJobFile(workspace, jobId));
+    const indexedJob = loadState(workspace).jobs.find((candidate) => candidate.id === jobId);
+    assert.equal(storedJob.errorMessage, "Already cancelled.");
+    assert.equal(indexedJob.status, "cancelled");
+    assert.equal(indexedJob.phase, "cancelled");
+  });
+});
+
 test("cancel tears down the shared server session when only dead leases remain", async () => {
   const workspace = makeTempDir();
   const pluginDataDir = makeTempDir();
