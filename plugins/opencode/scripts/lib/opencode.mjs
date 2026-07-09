@@ -372,6 +372,7 @@ function createTurnCaptureState(sessionID, options = {}) {
     responseError: null,
     recoveryError: null,
     response: null,
+    fallbackTimer: null,
     onProgress: options.onProgress ?? null,
     write: Boolean(options.write)
   };
@@ -422,11 +423,26 @@ function completeTurn(state, options = {}) {
   if (state.completed) {
     return;
   }
+  if (state.fallbackTimer) {
+    clearTimeout(state.fallbackTimer);
+    state.fallbackTimer = null;
+  }
   state.completed = true;
   if (options.inferred) {
     emitProgress(state.onProgress, "Turn completion inferred after OpenCode returned the message response.", "finalizing");
   }
   state.resolveCompletion(state);
+}
+
+function scheduleResponseFallbackCompletion(state) {
+  if (state.completed || state.fallbackTimer) {
+    return;
+  }
+  state.fallbackTimer = setTimeout(() => {
+    state.fallbackTimer = null;
+    completeTurn(state, { inferred: true });
+  }, 250);
+  state.fallbackTimer.unref?.();
 }
 
 function applyMessageParts(state, parts, sessionID) {
@@ -591,14 +607,17 @@ async function recoverFinalMessageFromServer(client, state, options = {}) {
   try {
     const raw = await client.listMessages(state.sessionID, { signal: options.signal, freshConnection: true });
     const messages = getMessagesArray(raw).filter(isAssistantMessage);
-    const assistant = state.messageID
+    let assistant = state.messageID
       ? messages.find((message) => extractMessageId(message) === state.messageID)
-      : messages
-          .filter((message) => {
-            const messageID = extractMessageId(message);
-            return messageID && !state.priorAssistantIds.has(messageID);
-          })
-          .pop();
+      : null;
+    if (!assistant) {
+      assistant = messages
+        .filter((message) => {
+          const messageID = extractMessageId(message);
+          return messageID && !state.priorAssistantIds.has(messageID);
+        })
+        .pop();
+    }
     if (!assistant) {
       return false;
     }
@@ -659,7 +678,6 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
   const turnTimeoutMs = Math.max(0, Number(options.turnTimeoutMs) || DEFAULT_TURN_TIMEOUT_MS);
   let timedOut = false;
   let turnTimer = null;
-  let responsePromise = Promise.resolve(null);
 
   try {
     await Promise.race([
@@ -671,25 +689,31 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
 
     await snapshotPriorAssistantIds(client, state, { signal: eventAbort.signal });
 
-    // Send the prompt asynchronously. The ack is only delivery confirmation; the
-    // assistant result and message id must come from events or HTTP recovery.
-    responsePromise = startRequest(eventAbort.signal)
+    // Send the prompt. The synchronous /message endpoint keeps this request open
+    // for the whole turn, so on long turns it can hit the client fetch timeout and
+    // reject with a transport error well before `session.idle` arrives. That
+    // transport failure must NOT fail the turn — only a real HTTP rejection (bad
+    // request, bad model, etc.) is fatal (issue #2 / findings #16, #17).
+    const responsePromise = startRequest(eventAbort.signal)
       .then((response) => {
         state.response = response;
+        state.messageID = response?.info?.id ?? response?.id ?? state.messageID;
+        applyMessageParts(state, response?.parts ?? [], state.sessionID);
+        scheduleResponseFallbackCompletion(state);
         return response;
       })
       .catch((error) => {
         state.responseError = error;
         // A server-side rejection is terminal; a transport error is not.
-        if (error instanceof OpencodeHttpError && !state.error) {
+        if (error instanceof OpencodeHttpError) {
           state.error = error;
           completeTurn(state);
         }
         return null;
       });
 
-    // Complete on `session.idle` / `session.error`, on the stream closing, or on
-    // the outer safety timeout — whichever comes first.
+    // Complete on `session.idle` / `session.error` / the response fallback, on the
+    // stream closing, or on the outer safety timeout — whichever comes first.
     const timeoutPromise =
       turnTimeoutMs > 0
         ? new Promise((resolve) => {
@@ -728,7 +752,9 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
     }
     eventAbort.abort();
     await eventStream.catch(() => {});
-    await responsePromise.catch(() => {});
+    if (state.fallbackTimer) {
+      clearTimeout(state.fallbackTimer);
+    }
   }
 }
 
@@ -991,7 +1017,7 @@ export async function runServerTurn(cwd, options = {}) {
         client,
         sessionID,
         (signal) =>
-          client.promptAsync(
+          client.sendMessage(
             sessionID,
             buildMessageParams(prompt, {
               model: options.model,

@@ -367,8 +367,6 @@ test("task forwards spark model alias and effort as OpenCode variant", { skip: L
       modelID: "gpt-5.3-codex-spark"
     });
     assert.equal(fakeState.lastMessage.body.variant, "high");
-    assert.equal(fakeState.lastMessage.delivery, "async");
-    assert.equal(fakeState.lastMessage.endpoint, "prompt_async");
   } finally {
     cleanupServer(repo, env);
   }
@@ -468,8 +466,9 @@ test("task succeeds when the message transport drops after session.idle (issue #
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
   initGitRepo(repo);
-  // The async prompt ack has already returned; this keeps the event-delivered
-  // success path covered for the historical transport mode.
+  // Simulates a slow turn where the held-open /message POST dies (client fetch
+  // timeout) but session.idle still arrives — the exact failure that reported a
+  // completed review as `fetch failed`.
   const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "transport" });
 
   try {
@@ -482,34 +481,6 @@ test("task succeeds when the message transport drops after session.idle (issue #
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.status, 0);
     assert.match(payload.rawOutput, /Handled the requested task/);
-    const fakeState = readFakeState(binDir);
-    assert.equal(fakeState.lastMessage.delivery, "async");
-    assert.equal(fakeState.lastMessage.endpoint, "prompt_async");
-  } finally {
-    cleanupServer(repo, env);
-  }
-});
-
-test("task returns a delayed turn result through async prompt delivery (issue #12)", { skip: LOCAL_LISTEN_SKIP }, () => {
-  const repo = makeTempDir();
-  const binDir = makeTempDir();
-  installFakeOpencode(binDir);
-  initGitRepo(repo);
-  const env = buildTestEnv(binDir, { FAKE_OPENCODE_TURN_DELAY_MS: "350" });
-
-  try {
-    const result = run("node", [SCRIPT, "task", "--json", "slow async task"], {
-      cwd: repo,
-      env
-    });
-
-    assert.equal(result.status, 0, result.stderr);
-    const payload = JSON.parse(result.stdout);
-    assert.equal(payload.status, 0);
-    assert.match(payload.rawOutput, /Handled the requested task/);
-    const fakeState = readFakeState(binDir);
-    assert.equal(fakeState.lastMessage.delivery, "async");
-    assert.equal(fakeState.lastMessage.endpoint, "prompt_async");
   } finally {
     cleanupServer(repo, env);
   }
@@ -520,7 +491,8 @@ test("task succeeds when the message transport drops before completion events (i
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
   initGitRepo(repo);
-  // Reproduces delayed completion events after an already-acknowledged prompt.
+  // Reproduces the real ordering where the held-open /message POST fails first,
+  // then the event stream later delivers the final message and session.idle.
   const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "delayed-events" });
 
   try {
@@ -533,9 +505,6 @@ test("task succeeds when the message transport drops before completion events (i
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.status, 0);
     assert.match(payload.rawOutput, /Handled the requested task/);
-    const fakeState = readFakeState(binDir);
-    assert.equal(fakeState.lastMessage.delivery, "async");
-    assert.equal(fakeState.lastMessage.endpoint, "prompt_async");
   } finally {
     cleanupServer(repo, env);
   }
@@ -546,8 +515,8 @@ test("task recovers the final message over HTTP when only session.idle arrives (
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
   initGitRepo(repo);
-  // No message.updated event: the client must re-fetch the finished assistant
-  // message from the server to complete.
+  // No message.updated event and a dropped POST response: the client must
+  // re-fetch the finished assistant message from the server to complete.
   const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "recover" });
 
   try {
@@ -560,9 +529,30 @@ test("task recovers the final message over HTTP when only session.idle arrives (
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.status, 0);
     assert.match(payload.rawOutput, /Handled the requested task/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("task recovery falls back to the newest assistant message when event message id is stale (issue #12)", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "mismatched-recover" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--json", "long running task"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 0);
+    assert.match(payload.rawOutput, /Handled the requested task/);
     const fakeState = readFakeState(binDir);
-    assert.equal(fakeState.lastMessage.delivery, "async");
-    assert.equal(fakeState.lastMessage.endpoint, "prompt_async");
+    assert.equal(payload.turnId, fakeState.responses[fakeState.responses.length - 1].info.id);
   } finally {
     cleanupServer(repo, env);
   }
@@ -623,9 +613,6 @@ test("task fails when completion has no recoverable current-turn message (issue 
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.status, 1);
     assert.equal(payload.rawOutput, "");
-    const fakeState = readFakeState(binDir);
-    assert.equal(fakeState.lastMessage.delivery, "async");
-    assert.equal(fakeState.lastMessage.endpoint, "prompt_async");
   } finally {
     cleanupServer(repo, env);
   }
