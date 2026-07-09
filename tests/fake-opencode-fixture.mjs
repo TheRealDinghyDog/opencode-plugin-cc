@@ -212,13 +212,21 @@ async function handleMessage(req, res, sessionID) {
   // out the held-open POST). "recover": additionally withhold message.updated so
   // the client must re-fetch the finished message via GET /session/:id/message.
   // "delayed-events" drops the POST before completion events arrive, matching
-  // the real failure ordering seen in issue #2 review.
+  // the real failure ordering seen in issue #2 review. "mismatched-recover"
+  // gives recovery a stale event-derived message id, then expects fallback to
+  // the newest assistant message returned by GET /session/:id/message.
   if (failMode === "delayed-events") {
     res.destroy();
     setTimeout(() => {
       emit({ type: "message.updated", sessionID, message: { id: messageID, parts } });
       emit({ type: "session.idle", sessionID });
     }, 25);
+    return;
+  }
+  if (failMode === "mismatched-recover") {
+    emit({ type: "message.updated", sessionID, message: { id: messageID + "_event_only" } });
+    emit({ type: "session.idle", sessionID });
+    res.destroy();
     return;
   }
   if (failMode !== "recover") {

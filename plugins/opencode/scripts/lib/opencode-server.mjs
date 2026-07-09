@@ -1,3 +1,6 @@
+import http from "node:http";
+import https from "node:https";
+
 export class OpencodeHttpError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -18,11 +21,14 @@ function encodePathSegment(value) {
 
 async function parseResponseBody(response) {
   const text = await response.text();
+  return parseBodyText(text, response.headers.get("content-type") ?? "");
+}
+
+function parseBodyText(text, contentType = "") {
   if (!text) {
     return {};
   }
 
-  const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
     return JSON.parse(text);
   }
@@ -32,6 +38,57 @@ async function parseResponseBody(response) {
   } catch {
     return text;
   }
+}
+
+function requestWithFreshConnection(url, options = {}) {
+  const transport = url.protocol === "https:" ? https : http;
+  const body = options.body == null ? null : JSON.stringify(options.body);
+  const headers = {
+    ...(body == null ? {} : { "content-type": "application/json", "content-length": Buffer.byteLength(body) }),
+    ...(options.headers ?? {}),
+    connection: "close"
+  };
+
+  return new Promise((resolve, reject) => {
+    const req = transport.request(
+      url,
+      {
+        method: options.method,
+        headers,
+        agent: false,
+        signal: options.signal
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            reject(
+              new OpencodeHttpError(`OpenCode ${options.method} ${options.path} failed with HTTP ${res.statusCode}.`, {
+                status: res.statusCode,
+                body: text,
+                url: url.href
+              })
+            );
+            return;
+          }
+
+          try {
+            const contentType = res.headers["content-type"];
+            resolve(parseBodyText(text, Array.isArray(contentType) ? contentType.join(";") : contentType ?? ""));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+    req.on("error", reject);
+    if (body != null) {
+      req.write(body);
+    }
+    req.end();
+  });
 }
 
 function parseSseBlock(block) {
@@ -119,6 +176,16 @@ export class OpencodeServerClient {
 
   async request(method, path, options = {}) {
     const url = this.url(path);
+    if (options.freshConnection) {
+      return requestWithFreshConnection(new URL(url), {
+        method,
+        path,
+        headers: options.headers,
+        body: options.body,
+        signal: options.signal
+      });
+    }
+
     const headers = {
       ...(options.body == null ? {} : { "content-type": "application/json" }),
       ...(options.headers ?? {})
@@ -188,7 +255,8 @@ export class OpencodeServerClient {
 
   listMessages(sessionID, options = {}) {
     return this.request("GET", `/session/${encodePathSegment(sessionID)}/message`, {
-      signal: options.signal
+      signal: options.signal,
+      freshConnection: options.freshConnection
     });
   }
 

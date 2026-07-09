@@ -534,6 +534,32 @@ test("task recovers the final message over HTTP when only session.idle arrives (
   }
 });
 
+test("task recovery falls back to the newest assistant message when event message id is stale (issue #12)", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "mismatched-recover" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--json", "long running task"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 0);
+    // The recovered text ("Handled the requested task") comes from the stored
+    // assistant message, so status 0 + this rawOutput already prove the .pop()
+    // fallback selected the right message despite the stale event id. (The
+    // --json payload intentionally does not expose turnId.)
+    assert.match(payload.rawOutput, /Handled the requested task/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
 test("task fails when completion has no recoverable current-turn message (issue #2)", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();

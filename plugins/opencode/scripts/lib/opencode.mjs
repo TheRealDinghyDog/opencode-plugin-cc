@@ -605,16 +605,19 @@ async function applyOpenCodeEvent(client, state, event, meta = {}) {
 // (issue #2).
 async function recoverFinalMessageFromServer(client, state, options = {}) {
   try {
-    const raw = await client.listMessages(state.sessionID, { signal: options.signal });
+    const raw = await client.listMessages(state.sessionID, { signal: options.signal, freshConnection: true });
     const messages = getMessagesArray(raw).filter(isAssistantMessage);
-    const assistant = state.messageID
+    let assistant = state.messageID
       ? messages.find((message) => extractMessageId(message) === state.messageID)
-      : messages
-          .filter((message) => {
-            const messageID = extractMessageId(message);
-            return messageID && !state.priorAssistantIds.has(messageID);
-          })
-          .pop();
+      : null;
+    if (!assistant) {
+      assistant = messages
+        .filter((message) => {
+          const messageID = extractMessageId(message);
+          return messageID && !state.priorAssistantIds.has(messageID);
+        })
+        .pop();
+    }
     if (!assistant) {
       return false;
     }
