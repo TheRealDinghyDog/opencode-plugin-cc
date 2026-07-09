@@ -168,20 +168,9 @@ async function waitForPermission(permissionID) {
   });
 }
 
-async function handleMessage(req, res, sessionID) {
-  const body = await readJson(req);
-  const state = loadState();
-  const session = state.sessions.find((candidate) => candidate.id === sessionID);
-  if (!session) {
-    sendJson(res, { error: "unknown session" }, 404);
-    return;
-  }
-
-  const messageID = "msg_" + state.nextMessageId++;
-  const prompt = textFromMessage(body);
-  state.messages.push({ sessionID, messageID, body, prompt });
-  state.lastMessage = { sessionID, messageID, body, prompt };
-  saveState(state);
+async function completeMessageTurn(res, sessionID, messageID, body, prompt, session, options = {}) {
+  const asyncDelivery = Boolean(options.asyncDelivery);
+  const failMode = process.env.FAKE_OPENCODE_MESSAGE_FAIL;
 
   emit({ type: "session.next.step.started", sessionID });
   if (session.agent === "build" || body.agent === "build") {
@@ -191,14 +180,20 @@ async function handleMessage(req, res, sessionID) {
     emit({ type: "file.edited", sessionID, path: "generated.txt" });
   }
 
+  const turnDelayMs = Math.max(0, Number(process.env.FAKE_OPENCODE_TURN_DELAY_MS || 0));
+  if (turnDelayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, turnDelayMs));
+  }
+
   const finalText = prompt.includes("follow up")
     ? "Resumed the prior OpenCode run.\\nFollow-up prompt accepted."
     : "Handled the requested task.\\nTask prompt accepted.";
   const parts = structuredOutputParts(body) || [{ type: "text", text: finalText }];
-  const failMode = process.env.FAKE_OPENCODE_MESSAGE_FAIL;
   if (failMode === "empty-recovery") {
     emit({ type: "session.idle", sessionID });
-    res.destroy();
+    if (!asyncDelivery) {
+      res.destroy();
+    }
     return;
   }
 
@@ -207,14 +202,12 @@ async function handleMessage(req, res, sessionID) {
   finalState.responses = finalState.responses || [];
   finalState.responses.push({ sessionID, info: { id: messageID, role: "assistant", sessionID }, parts });
   saveState(finalState);
-  // Issue #2 regression hooks. "transport": deliver the turn over the event
-  // stream but drop the /message HTTP response mid-flight (like undici timing
-  // out the held-open POST). "recover": additionally withhold message.updated so
-  // the client must re-fetch the finished message via GET /session/:id/message.
-  // "delayed-events" drops the POST before completion events arrive, matching
-  // the real failure ordering seen in issue #2 review.
+  // Issue #2/#12 regression hooks. In async mode the prompt ack has already
+  // returned, so transport failures only affect the event/recovery path.
   if (failMode === "delayed-events") {
-    res.destroy();
+    if (!asyncDelivery) {
+      res.destroy();
+    }
     setTimeout(() => {
       emit({ type: "message.updated", sessionID, message: { id: messageID, parts } });
       emit({ type: "session.idle", sessionID });
@@ -225,11 +218,40 @@ async function handleMessage(req, res, sessionID) {
     emit({ type: "message.updated", sessionID, message: { id: messageID, parts } });
   }
   emit({ type: "session.idle", sessionID });
-  if (failMode === "transport" || failMode === "recover") {
+  if (!asyncDelivery && (failMode === "transport" || failMode === "recover")) {
     res.destroy();
     return;
   }
-  sendJson(res, { info: { id: messageID, sessionID }, parts });
+  if (!asyncDelivery) {
+    sendJson(res, { info: { id: messageID, sessionID }, parts });
+  }
+}
+
+async function handleMessage(req, res, sessionID, options = {}) {
+  const body = await readJson(req);
+  const state = loadState();
+  const session = state.sessions.find((candidate) => candidate.id === sessionID);
+  if (!session) {
+    sendJson(res, { error: "unknown session" }, 404);
+    return;
+  }
+
+  const messageID = "msg_" + state.nextMessageId++;
+  const prompt = textFromMessage(body);
+  const delivery = options.asyncDelivery ? "async" : "sync";
+  const endpoint = options.endpoint || "message";
+  state.messages.push({ sessionID, messageID, body, prompt, delivery, endpoint });
+  state.lastMessage = { sessionID, messageID, body, prompt, delivery, endpoint };
+  saveState(state);
+
+  if (options.asyncDelivery) {
+    sendJson(res, { ok: true, info: { id: messageID, sessionID } });
+    completeMessageTurn(res, sessionID, messageID, body, prompt, session, options).catch((error) => {
+      emit({ type: "session.error", sessionID, error: { message: error.message } });
+    });
+    return;
+  }
+  await completeMessageTurn(res, sessionID, messageID, body, prompt, session, options);
 }
 
 function handleSessionListCli() {
@@ -397,6 +419,24 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === "POST" && messageMatch) {
     await handleMessage(req, res, decodeURIComponent(messageMatch[1]));
+    return;
+  }
+
+  const promptAsyncMatch = url.pathname.match(/^\\/session\\/([^/]+)\\/prompt_async$/);
+  if (req.method === "POST" && promptAsyncMatch) {
+    await handleMessage(req, res, decodeURIComponent(promptAsyncMatch[1]), {
+      asyncDelivery: true,
+      endpoint: "prompt_async"
+    });
+    return;
+  }
+
+  const backgroundMatch = url.pathname.match(/^\\/experimental\\/session\\/([^/]+)\\/background$/);
+  if (req.method === "POST" && backgroundMatch) {
+    await handleMessage(req, res, decodeURIComponent(backgroundMatch[1]), {
+      asyncDelivery: true,
+      endpoint: "background"
+    });
     return;
   }
 
