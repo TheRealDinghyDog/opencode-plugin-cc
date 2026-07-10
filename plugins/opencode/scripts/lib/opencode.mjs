@@ -1220,6 +1220,29 @@ export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) 
   };
 }
 
+function extractConnectedProviderIds(provider) {
+  if (!provider || typeof provider !== "object") {
+    return [];
+  }
+  // The 1.17.15 /provider response carries connected provider ids in
+  // `connected`; tolerate id-object entries but no invented field aliases.
+  const connected = provider.connected ?? [];
+  if (!Array.isArray(connected)) {
+    return [];
+  }
+  return connected
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return entry;
+      }
+      if (entry && typeof entry === "object" && typeof entry.id === "string") {
+        return entry.id;
+      }
+      return null;
+    })
+    .filter(Boolean);
+}
+
 export async function getAuthStatus(cwd) {
   const availability = getAvailability(cwd);
   if (!availability.available) {
@@ -1239,6 +1262,20 @@ export async function getAuthStatus(cwd) {
       if (config?.error && provider?.error) {
         throw config.error;
       }
+
+      const connectedProviders = extractConnectedProviderIds(provider);
+      const isConnected = connectedProviders.length > 0;
+
+      if (!isConnected) {
+        return buildAuthStatus({
+          loggedIn: false,
+          detail: "No OpenCode provider is connected. Configure and connect an OpenCode provider, then rerun /opencode:setup.",
+          source: "server",
+          available: true,
+          provider: null
+        });
+      }
+
       const providerID =
         provider?.id ??
         provider?.providerID ??
