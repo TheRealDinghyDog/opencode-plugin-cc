@@ -196,10 +196,13 @@ async function handleMessage(req, res, sessionID) {
     : "Handled the requested task.\\nTask prompt accepted.";
   const parts = structuredOutputParts(body) || [{ type: "text", text: finalText }];
   const failMode = process.env.FAKE_OPENCODE_MESSAGE_FAIL;
-  if (failMode === "empty-recovery") {
+  if (failMode === "empty-recovery" || failMode === "snapshot-fails-empty-recovery") {
     emit({ type: "session.idle", sessionID });
     res.destroy();
     return;
+  }
+  if (failMode === "event-drop-before-message-response") {
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
 
   const finalState = loadState();
@@ -363,6 +366,9 @@ const server = http.createServer(async (req, res) => {
     res.write(":ok\\n\\n");
     clients.add(res);
     req.on("close", () => clients.delete(res));
+    if (process.env.FAKE_OPENCODE_MESSAGE_FAIL === "event-drop-before-message-response") {
+      setTimeout(() => res.destroy(), 30);
+    }
     return;
   }
 
@@ -399,7 +405,16 @@ const server = http.createServer(async (req, res) => {
   const messageMatch = url.pathname.match(/^\\/session\\/([^/]+)\\/message$/);
   if (req.method === "GET" && messageMatch) {
     const sessionID = decodeURIComponent(messageMatch[1]);
-    const responses = (loadState().responses || []).filter((entry) => entry.sessionID === sessionID);
+    const state = loadState();
+    if (process.env.FAKE_OPENCODE_MESSAGE_FAIL === "snapshot-fails-empty-recovery") {
+      state.messageListCalls = (state.messageListCalls || 0) + 1;
+      saveState(state);
+      if (state.messageListCalls === 1) {
+        sendJson(res, { error: "snapshot failed" }, 503);
+        return;
+      }
+    }
+    const responses = (state.responses || []).filter((entry) => entry.sessionID === sessionID);
     sendJson(res, responses);
     return;
   }

@@ -18,6 +18,8 @@ const READ_ONLY_AGENT = "plan";
 // (issue #2 / review finding #17). Deep reviews legitimately run many minutes,
 // so keep it generous; on expiry we still try to recover the final message.
 const DEFAULT_TURN_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_STREAM_DROP_GRACE_MS = 5000;
+const DEFAULT_RECOVERY_TIMEOUT_MS = 5000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -362,6 +364,9 @@ function createTurnCaptureState(sessionID, options = {}) {
     resolveCompletion,
     rejectCompletion,
     priorAssistantIds: new Set(options.priorAssistantIds ?? []),
+    priorAssistantSnapshotSucceeded: false,
+    priorAssistantSnapshotError: null,
+    resumed: Boolean(options.resumed),
     finalMessage: "",
     structuredOutput: null,
     reasoningSummary: [],
@@ -604,13 +609,30 @@ async function applyOpenCodeEvent(client, state, event, meta = {}) {
 // Re-fetch it over HTTP so a slow-but-successful turn isn't reported as failed
 // (issue #2).
 async function recoverFinalMessageFromServer(client, state, options = {}) {
+  const recoveryTimeoutMs = Math.max(
+    0,
+    Number(options.recoveryTimeoutMs ?? DEFAULT_RECOVERY_TIMEOUT_MS) || DEFAULT_RECOVERY_TIMEOUT_MS
+  );
+  const controller = new AbortController();
+  let timeout = null;
+  if (recoveryTimeoutMs > 0) {
+    timeout = setTimeout(() => {
+      controller.abort(new Error(`OpenCode recovery timed out after ${recoveryTimeoutMs}ms.`));
+    }, recoveryTimeoutMs);
+    timeout.unref?.();
+  }
+
   try {
-    const raw = await client.listMessages(state.sessionID, { signal: options.signal, freshConnection: true });
+    const raw = await client.listMessages(state.sessionID, {
+      signal: controller.signal,
+      freshConnection: true,
+      requestTimeoutMs: recoveryTimeoutMs
+    });
     const messages = getMessagesArray(raw).filter(isAssistantMessage);
     let assistant = state.messageID
       ? messages.find((message) => extractMessageId(message) === state.messageID)
       : null;
-    if (!assistant) {
+    if (!assistant && (state.priorAssistantSnapshotSucceeded || !state.resumed)) {
       assistant = messages
         .filter((message) => {
           const messageID = extractMessageId(message);
@@ -632,6 +654,10 @@ async function recoverFinalMessageFromServer(client, state, options = {}) {
   } catch (error) {
     state.recoveryError = error;
     return false;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
   }
 }
 
@@ -644,8 +670,12 @@ async function snapshotPriorAssistantIds(client, state, options = {}) {
         .map(extractMessageId)
         .filter(Boolean)
     );
-  } catch {
+    state.priorAssistantSnapshotSucceeded = true;
+    state.priorAssistantSnapshotError = null;
+  } catch (error) {
     state.priorAssistantIds = new Set();
+    state.priorAssistantSnapshotSucceeded = false;
+    state.priorAssistantSnapshotError = error;
   }
 }
 
@@ -694,6 +724,12 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
     // reject with a transport error well before `session.idle` arrives. That
     // transport failure must NOT fail the turn — only a real HTTP rejection (bad
     // request, bad model, etc.) is fatal (issue #2 / findings #16, #17).
+    let responseSettled = false;
+    let resolveResponseSettled;
+    const responseSettledPromise = new Promise((resolve) => {
+      resolveResponseSettled = resolve;
+    });
+
     const responsePromise = startRequest(eventAbort.signal)
       .then((response) => {
         state.response = response;
@@ -710,10 +746,19 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
           completeTurn(state);
         }
         return null;
+      })
+      .finally(() => {
+        responseSettled = true;
+        resolveResponseSettled(state);
       });
 
-    // Complete on `session.idle` / `session.error` / the response fallback, on the
-    // stream closing, or on the outer safety timeout — whichever comes first.
+    // Complete on `session.idle` / `session.error`, the response fallback
+    // (`scheduleResponseFallbackCompletion`, whose 250ms grace also lets trailing
+    // events like file edits drain before we finalize), or the outer safety
+    // timeout. A bare event-stream close is NOT completion while /message is still
+    // pending; on a stream drop, give the response a short grace window before
+    // trying recovery. We deliberately do NOT complete the race the instant the
+    // response resolves — that would cut the trailing-event grace short.
     const timeoutPromise =
       turnTimeoutMs > 0
         ? new Promise((resolve) => {
@@ -724,12 +769,31 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
             turnTimer.unref?.();
           })
         : new Promise(() => {});
-    await Promise.race([state.completion, eventStream, timeoutPromise]);
+    const streamDropGraceMs = Math.max(
+      0,
+      Number(options.streamDropGraceMs ?? DEFAULT_STREAM_DROP_GRACE_MS) || DEFAULT_STREAM_DROP_GRACE_MS
+    );
+    const eventStreamDropPromise = eventStream.then(async () => {
+      if (state.completed || responseSettled) {
+        return state;
+      }
+      if (streamDropGraceMs > 0) {
+        await Promise.race([state.completion, responseSettledPromise, sleep(streamDropGraceMs)]);
+      }
+      return state;
+    });
+
+    await Promise.race([state.completion, eventStreamDropPromise, timeoutPromise]);
 
     // If we didn't capture a usable result, pull the finished message straight
-    // from the server before giving up.
-    if (!state.error && (!state.completed || (!state.finalMessage && state.structuredOutput == null))) {
-      await recoverFinalMessageFromServer(client, state, { signal: eventAbort.signal });
+    // from the server before giving up. Key this off whether we actually lack a
+    // result — NOT off `state.completed`. The race can resolve while a result is
+    // already captured but the completion flag hasn't flipped yet (e.g. within the
+    // response fallback's 250ms grace); re-fetching a message we already have is a
+    // redundant GET that undoes the issue #12 sync-capture optimization. This
+    // mirrors the "lack a result" check used just below for the error path.
+    if (!state.error && !state.finalMessage && state.structuredOutput == null) {
+      await recoverFinalMessageFromServer(client, state, { recoveryTimeoutMs: options.recoveryTimeoutMs });
     }
 
     // Nothing captured and no genuine error => surface the underlying cause.
@@ -1005,6 +1069,7 @@ export async function runServerTurn(cwd, options = {}) {
 
     let sessionID = options.resumeThreadId ?? options.resumeSessionId ?? null;
     let createdSessionID = null;
+    const resumedSession = Boolean(sessionID);
 
     if (sessionID) {
       emitProgress(options.onProgress, `Resuming OpenCode session ${sessionID}.`, "starting", {
@@ -1054,6 +1119,7 @@ export async function runServerTurn(cwd, options = {}) {
         {
           onProgress: options.onProgress,
           write,
+          resumed: resumedSession,
           turnTimeoutMs: options.turnTimeoutMs
         }
       );
