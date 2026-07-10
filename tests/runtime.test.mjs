@@ -124,6 +124,36 @@ function jsonResponse(value, status = 200) {
   });
 }
 
+// Spawns the fake fixture directly as a user-managed external server (no
+// plugin lifecycle, no password) and resolves its base URL from stdout.
+function startExternalFixtureServer(binDir) {
+  const child = spawn("node", [path.join(binDir, "opencode"), "serve", "--hostname", "127.0.0.1", "--port", "0"], {
+    env: {
+      ...process.env,
+      FAKE_OPENCODE_STATE_PATH: path.join(binDir, "fake-opencode-state.json"),
+      OPENCODE_SERVER_PASSWORD: ""
+    },
+    windowsHide: true
+  });
+
+  const url = new Promise((resolve, reject) => {
+    let output = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+      const match = output.match(/listening on (http:\/\/[^\s]+)/);
+      if (match) {
+        resolve(match[1]);
+      }
+    });
+    child.once("error", reject);
+    child.once("exit", () => reject(new Error("external fixture server exited before listening")));
+    setTimeout(() => reject(new Error("external fixture server did not start")), 5000).unref();
+  });
+
+  return { child, url };
+}
+
 test("interruptServerTurn marks env-provided server urls as external", async () => {
   const workspace = makeTempDir();
   const binDir = makeTempDir();
@@ -175,6 +205,8 @@ process.exit(1);
       { method: "POST", pathname: "/session/ses_external/abort" }
     ]);
 
+    // Ownership comes from the job record, never from the current environment
+    // (issue #29): without a persisted flag the result must not claim one.
     const missingThreadResult = await withProcessEnv(
       {
         [SERVER_URL_ENV]: "http://opencode.test/"
@@ -182,7 +214,15 @@ process.exit(1);
       () => interruptServerTurn(workspace, { threadId: null, serverUrl: "http://opencode.test" })
     );
     assert.equal(missingThreadResult.attempted, false);
-    assert.equal(missingThreadResult.serverExternal, true);
+    assert.equal("serverExternal" in missingThreadResult, false);
+
+    const persistedExternalResult = await interruptServerTurn(workspace, {
+      threadId: null,
+      serverUrl: "http://opencode.test",
+      serverExternal: true
+    });
+    assert.equal(persistedExternalResult.attempted, false);
+    assert.equal(persistedExternalResult.serverExternal, true);
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -424,6 +464,107 @@ test("cancel tears down a server it starts to abort a job without a recorded ser
       cleanupServer(workspace, env);
     }
   });
+});
+
+test("external server requests are bound to each invoking workspace (issue #29)", { skip: LOCAL_LISTEN_SKIP }, async () => {
+  const repoA = makeTempDir();
+  const repoB = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repoA);
+  initGitRepo(repoB);
+  const { child, url } = startExternalFixtureServer(binDir);
+
+  try {
+    const serverUrl = await url;
+    const resultA = run("node", [SCRIPT, "task", "--json", "task in workspace A"], {
+      cwd: repoA,
+      env: buildTestEnv(binDir, { [SERVER_URL_ENV]: serverUrl })
+    });
+    assert.equal(resultA.status, 0, resultA.stderr);
+    const resultB = run("node", [SCRIPT, "task", "--json", "task in workspace B"], {
+      cwd: repoB,
+      env: buildTestEnv(binDir, { [SERVER_URL_ENV]: serverUrl })
+    });
+    assert.equal(resultB.status, 0, resultB.stderr);
+
+    // One shared external server, two workspaces: each session must be scoped
+    // to the invoking repo, not the server process's launch directory.
+    const fakeState = readFakeState(binDir);
+    const directories = fakeState.sessions.map((session) => session.directory).sort();
+    assert.deepEqual(directories, [fs.realpathSync(repoA), fs.realpathSync(repoB)].sort());
+
+    // The event subscriptions carried the workspace scope too.
+    const eventDirectories = (fakeState.eventDirectories || []).filter(Boolean);
+    assert.ok(eventDirectories.includes(fs.realpathSync(repoA)), "event stream scoped to workspace A");
+    assert.ok(eventDirectories.includes(fs.realpathSync(repoB)), "event stream scoped to workspace B");
+  } finally {
+    child.kill();
+  }
+});
+
+test("cancel without the job-start environment leaves an external server running (issue #29)", { skip: LOCAL_LISTEN_SKIP }, async () => {
+  const workspace = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+  const { child, url } = startExternalFixtureServer(binDir);
+
+  try {
+    const serverUrl = await url;
+    await withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, async () => {
+      const jobId = "job-cancel-env-divergent";
+      const timestamp = new Date().toISOString();
+      const logFile = resolveJobLogFile(workspace, jobId);
+      const runningJob = {
+        id: jobId,
+        workspaceRoot: workspace,
+        jobClass: "task",
+        kind: "task",
+        status: "running",
+        phase: "running",
+        pid: null,
+        title: "Running external task",
+        threadId: "ses_env_divergent",
+        // Persisted at job start; the cancel environment below deliberately
+        // lacks OPENCODE_COMPANION_SERVER_URL (the review's H-04 scenario).
+        serverUrl,
+        serverExternal: true,
+        logFile,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+      saveState(workspace, {
+        version: 1,
+        config: { stopReviewGate: false },
+        jobs: [runningJob]
+      });
+      writeJobFile(workspace, jobId, runningJob);
+
+      const result = run("node", [SCRIPT, "cancel", jobId, "--cwd", workspace, "--json"], {
+        cwd: workspace,
+        env: buildEnv(binDir, {
+          CLAUDE_PLUGIN_DATA: pluginDataDir,
+          OPENCODE_COMPANION_SESSION_ID: "sess-current"
+        })
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      const payload = JSON.parse(result.stdout);
+      assert.equal(payload.cancelled, true);
+      assert.equal(payload.turnInterruptAttempted, true);
+      assert.equal(payload.turnInterrupted, true);
+      assert.equal(readFakeState(binDir).lastAbort, "ses_env_divergent");
+
+      // The user-managed server must survive the cancel: no dispose (the
+      // fixture exits on dispose), no process kill.
+      const health = await fetch(`${serverUrl}/global/health`);
+      assert.equal(health.status, 200);
+      await health.text();
+    });
+  } finally {
+    child.kill();
+  }
 });
 
 test("cancel aborts but does not dispose an env-provided external server", async () => {

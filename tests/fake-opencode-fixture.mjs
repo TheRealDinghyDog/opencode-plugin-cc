@@ -513,6 +513,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/event") {
+    // Record the workspace scope of each event subscription so tests can
+    // assert the client binds its stream to the invoking directory.
+    const eventState = loadState();
+    eventState.eventDirectories = eventState.eventDirectories || [];
+    eventState.eventDirectories.push(url.searchParams.get("directory"));
+    saveState(eventState);
     res.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
@@ -529,14 +535,22 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/session") {
-    sendJson(res, loadState().sessions);
+    // Mirror the real server: a directory query scopes the listing to that
+    // workspace.
+    const directory = url.searchParams.get("directory");
+    const sessions = loadState().sessions.filter(
+      (session) => !directory || session.directory === directory
+    );
+    sendJson(res, sessions);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/session") {
     const body = await readJson(req);
     // Mirror the real server: create-session rejects \`directory\` and \`model\`
-    // (additionalProperties:false / model belongs on the message) with 400.
+    // in the BODY (additionalProperties:false / model belongs on the message)
+    // with 400; the workspace is scoped via the \`directory\` QUERY parameter
+    // and otherwise inherits the server process launch directory.
     if ("directory" in body || "model" in body) {
       sendJson(res, { _tag: "BadRequest" }, 400);
       return;
@@ -544,7 +558,7 @@ const server = http.createServer(async (req, res) => {
     const state = loadState();
     const session = {
       id: "ses_" + state.nextSessionId++,
-      directory: body.directory || process.cwd(),
+      directory: url.searchParams.get("directory") || process.cwd(),
       title: body.title || null,
       agent: body.agent || null,
       model: body.model || null,

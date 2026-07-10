@@ -225,6 +225,7 @@ export class OpencodeServerClient {
     this.baseUrl = trimBaseUrl(baseUrl);
     this.fetch = options.fetch ?? globalThis.fetch;
     this.authorization = buildBasicAuthHeader(options);
+    this.directory = typeof options.directory === "string" && options.directory ? options.directory : null;
     if (!this.baseUrl) {
       throw new Error("OpenCode server URL is required.");
     }
@@ -235,7 +236,16 @@ export class OpencodeServerClient {
 
   url(path) {
     const suffix = String(path ?? "").startsWith("/") ? path : `/${path}`;
-    return `${this.baseUrl}${suffix}`;
+    const base = `${this.baseUrl}${suffix}`;
+    // Bind project-scoped requests to the invoking workspace. Without the
+    // `directory` query an external server resolves them against its own
+    // launch directory (issue #29). Every non-/global/ route the client uses
+    // accepts it (verified against the 1.17.15 OpenAPI document).
+    if (!this.directory || suffix.startsWith("/global/")) {
+      return base;
+    }
+    const separator = suffix.includes("?") ? "&" : "?";
+    return `${base}${separator}directory=${encodeURIComponent(this.directory)}`;
   }
 
   authHeaders() {
