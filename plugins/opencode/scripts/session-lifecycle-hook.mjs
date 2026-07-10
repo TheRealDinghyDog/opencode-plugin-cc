@@ -12,12 +12,14 @@ import {
   loadServerSession,
   teardownServerSession
 } from "./lib/server-lifecycle.mjs";
-import { resolveStateFile, updateState } from "./lib/state.mjs";
+import { resolveStateFile, updateStateAsync } from "./lib/state.mjs";
 import { TRANSCRIPT_PATH_ENV } from "./lib/claude-session-transfer.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 
 export const SESSION_ID_ENV = "OPENCODE_COMPANION_SESSION_ID";
 const PLUGIN_DATA_ENV = "CLAUDE_PLUGIN_DATA";
+const SESSION_END_STATE_LOCK_ACQUIRE_TIMEOUT_MS = 500;
+const SESSION_END_SERVER_LOCK_ACQUIRE_TIMEOUT_MS = 3000;
 
 function readHookInput() {
   const raw = fs.readFileSync(0, "utf8").trim();
@@ -38,7 +40,7 @@ function appendEnvVar(name, value) {
   fs.appendFileSync(process.env.CLAUDE_ENV_FILE, `export ${name}=${shellEscape(value)}\n`, "utf8");
 }
 
-function cleanupSessionJobs(cwd, sessionId) {
+async function cleanupSessionJobs(cwd, sessionId) {
   if (!cwd || !sessionId) {
     return;
   }
@@ -50,10 +52,14 @@ function cleanupSessionJobs(cwd, sessionId) {
   }
 
   let removedJobs = [];
-  updateState(workspaceRoot, (state) => {
-    removedJobs = state.jobs.filter((job) => job.sessionId === sessionId);
-    state.jobs = state.jobs.filter((job) => job.sessionId !== sessionId);
-  });
+  await updateStateAsync(
+    workspaceRoot,
+    (state) => {
+      removedJobs = state.jobs.filter((job) => job.sessionId === sessionId);
+      state.jobs = state.jobs.filter((job) => job.sessionId !== sessionId);
+    },
+    { lockAcquireTimeoutMs: SESSION_END_STATE_LOCK_ACQUIRE_TIMEOUT_MS }
+  );
   if (removedJobs.length === 0) {
     return;
   }
@@ -92,7 +98,7 @@ async function handleSessionEnd(input) {
       : null);
 
   try {
-    cleanupSessionJobs(cwd, input.session_id || process.env[SESSION_ID_ENV]);
+    await cleanupSessionJobs(cwd, input.session_id || process.env[SESSION_ID_ENV]);
   } catch (error) {
     process.stderr.write(
       `OpenCode session job cleanup failed: ${error instanceof Error ? error.message : String(error)}\n`
@@ -106,8 +112,12 @@ async function handleSessionEnd(input) {
     sessionDir: serverSession?.sessionDir ?? null,
     pid: serverSession?.pid ?? null,
     external: Boolean(serverSession?.external),
-    killProcess: terminateProcessTree
+    killProcess: terminateProcessTree,
+    lockAcquireTimeoutMs: SESSION_END_SERVER_LOCK_ACQUIRE_TIMEOUT_MS
   });
+  if (teardown?.diagnostic) {
+    process.stderr.write(`${teardown.diagnostic}\n`);
+  }
   if (!teardown?.skipped) {
     clearServerSession(cwd);
   }

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { interruptServerTurn, runServerTurn } from "../plugins/opencode/scripts/lib/opencode.mjs";
 import { loadServerSession, saveServerSession, SERVER_URL_ENV } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
-import { resolveJobLogFile, resolveStateFile, saveState, writeJobFile } from "../plugins/opencode/scripts/lib/state.mjs";
+import { resolveJobLogFile, resolveStateDir, resolveStateFile, saveState, writeJobFile } from "../plugins/opencode/scripts/lib/state.mjs";
 import { buildEnv, installFakeOpencode, readFakeState, readServerBootCount } from "./fake-opencode-fixture.mjs";
 import { initGitRepo, makeTempDir, run, writeExecutable } from "./helpers.mjs";
 
@@ -86,6 +86,35 @@ function runServerTurnEnv(env) {
     FAKE_OPENCODE_STATE_PATH: env.FAKE_OPENCODE_STATE_PATH,
     OPENCODE_COMPANION_SESSION_ID: env.OPENCODE_COMPANION_SESSION_ID
   };
+}
+
+function runWithTimeout(command, args, options = {}, timeoutMs) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeoutMs);
+    child.on("close", (status, signal) => {
+      clearTimeout(timeout);
+      resolve({ status, signal, stdout, stderr, timedOut });
+    });
+    child.stdin.end(options.input ?? "");
+  });
 }
 
 function jsonResponse(value, status = 200) {
@@ -227,6 +256,54 @@ test("session end leaves server session when teardown is skipped for active leas
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(loadServerSession(workspace).url, "http://127.0.0.1:1");
+  });
+});
+
+test("session end bounds a contended server teardown lock and reports a diagnostic", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+
+  await withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, async () => {
+    saveServerSession(workspace, {
+      url: "http://127.0.0.1:1",
+      pid: null,
+      pidFile: null,
+      logFile: null,
+      sessionDir: null,
+      external: false,
+      leases: []
+    });
+    const lockDir = path.join(resolveStateDir(workspace), "server.lock");
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(lockDir, "owner.json"),
+      `${JSON.stringify({ pid: process.pid, token: "other-holder", createdAt: new Date().toISOString() })}\n`,
+      "utf8"
+    );
+
+    try {
+      const result = await runWithTimeout(
+        "node",
+        [SESSION_HOOK, "SessionEnd"],
+        {
+          cwd: workspace,
+          env: {
+            ...process.env,
+            CLAUDE_PLUGIN_DATA: pluginDataDir,
+            OPENCODE_COMPANION_SESSION_ID: "sess-server-lock-contention"
+          },
+          input: JSON.stringify({ cwd: workspace, session_id: "sess-server-lock-contention" })
+        },
+        4200
+      );
+
+      assert.equal(result.timedOut, false, "SessionEnd should finish within its five-second hook budget");
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stderr, /Timed out acquiring the OpenCode server lock for teardown/);
+      assert.equal(loadServerSession(workspace).url, "http://127.0.0.1:1");
+    } finally {
+      fs.rmSync(lockDir, { recursive: true, force: true });
+    }
   });
 });
 
