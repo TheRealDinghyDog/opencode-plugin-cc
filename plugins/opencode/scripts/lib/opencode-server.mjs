@@ -1,6 +1,8 @@
 import http from "node:http";
 import https from "node:https";
 
+const DEFAULT_FRESH_CONNECTION_TIMEOUT_MS = 30_000;
+
 export class OpencodeHttpError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -43,6 +45,10 @@ function parseBodyText(text, contentType = "") {
 function requestWithFreshConnection(url, options = {}) {
   const transport = url.protocol === "https:" ? https : http;
   const body = options.body == null ? null : JSON.stringify(options.body);
+  const requestTimeoutMs = Math.max(
+    0,
+    Number(options.requestTimeoutMs ?? DEFAULT_FRESH_CONNECTION_TIMEOUT_MS) || DEFAULT_FRESH_CONNECTION_TIMEOUT_MS
+  );
   const headers = {
     ...(body == null ? {} : { "content-type": "application/json", "content-length": Buffer.byteLength(body) }),
     ...(options.headers ?? {}),
@@ -50,6 +56,29 @@ function requestWithFreshConnection(url, options = {}) {
   };
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let responseEnded = false;
+
+    function settle(fn, value) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      fn(value);
+    }
+
+    function resolveOnce(value) {
+      settle(resolve, value);
+    }
+
+    function rejectOnce(error) {
+      settle(reject, error);
+    }
+
+    function transportError(message) {
+      return new Error(`OpenCode ${options.method} ${options.path} ${message}.`);
+    }
+
     const req = transport.request(
       url,
       {
@@ -62,9 +91,10 @@ function requestWithFreshConnection(url, options = {}) {
         const chunks = [];
         res.on("data", (chunk) => chunks.push(chunk));
         res.on("end", () => {
+          responseEnded = true;
           const text = Buffer.concat(chunks).toString("utf8");
           if (res.statusCode < 200 || res.statusCode >= 300) {
-            reject(
+            rejectOnce(
               new OpencodeHttpError(`OpenCode ${options.method} ${options.path} failed with HTTP ${res.statusCode}.`, {
                 status: res.statusCode,
                 body: text,
@@ -76,14 +106,33 @@ function requestWithFreshConnection(url, options = {}) {
 
           try {
             const contentType = res.headers["content-type"];
-            resolve(parseBodyText(text, Array.isArray(contentType) ? contentType.join(";") : contentType ?? ""));
+            resolveOnce(parseBodyText(text, Array.isArray(contentType) ? contentType.join(";") : contentType ?? ""));
           } catch (error) {
-            reject(error);
+            rejectOnce(error);
+          }
+        });
+        res.on("aborted", () => rejectOnce(transportError("response aborted before completion")));
+        res.on("error", rejectOnce);
+        res.on("close", () => {
+          if (!responseEnded) {
+            rejectOnce(transportError("response closed before completion"));
           }
         });
       }
     );
-    req.on("error", reject);
+    req.on("error", rejectOnce);
+    req.on("close", () => {
+      if (!responseEnded) {
+        rejectOnce(transportError("request closed before response completion"));
+      }
+    });
+    if (requestTimeoutMs > 0) {
+      req.setTimeout(requestTimeoutMs, () => {
+        const error = transportError(`timed out after ${requestTimeoutMs}ms`);
+        rejectOnce(error);
+        req.destroy(error);
+      });
+    }
     if (body != null) {
       req.write(body);
     }
@@ -182,7 +231,8 @@ export class OpencodeServerClient {
         path,
         headers: options.headers,
         body: options.body,
-        signal: options.signal
+        signal: options.signal,
+        requestTimeoutMs: options.requestTimeoutMs
       });
     }
 
@@ -256,7 +306,8 @@ export class OpencodeServerClient {
   listMessages(sessionID, options = {}) {
     return this.request("GET", `/session/${encodePathSegment(sessionID)}/message`, {
       signal: options.signal,
-      freshConnection: options.freshConnection
+      freshConnection: options.freshConnection,
+      requestTimeoutMs: options.requestTimeoutMs
     });
   }
 
