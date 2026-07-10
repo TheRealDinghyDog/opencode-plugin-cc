@@ -57,6 +57,58 @@ test(
   }
 );
 
+test(
+  "ensureServer handles password-protected external servers via OpenCode's auth variables (issue #27)",
+  { skip: LOCAL_LISTEN_AVAILABLE ? false : "local 127.0.0.1 listen is unavailable in this sandbox" },
+  async () => {
+    const password = "external-secret";
+    const expectedAuthorization = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`;
+    let authorizedRequests = 0;
+    const server = http.createServer((req, res) => {
+      if (req.headers.authorization !== expectedAuthorization) {
+        res.writeHead(401, { "www-authenticate": 'Basic realm="opencode"' });
+        res.end();
+        return;
+      }
+      authorizedRequests += 1;
+      if (req.method === "GET" && req.url === "/global/health") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${server.address().port}`;
+    const workspace = makeTempDir();
+
+    try {
+      await assert.rejects(
+        () => ensureServer(workspace, { env: { OPENCODE_COMPANION_SERVER_URL: url } }),
+        /requires authentication.*OPENCODE_SERVER_PASSWORD/s
+      );
+      await assert.rejects(
+        () =>
+          ensureServer(workspace, {
+            env: { OPENCODE_COMPANION_SERVER_URL: url, OPENCODE_SERVER_PASSWORD: "wrong" }
+          }),
+        /rejected the provided credentials/
+      );
+
+      const result = await ensureServer(workspace, {
+        env: { OPENCODE_COMPANION_SERVER_URL: url, OPENCODE_SERVER_PASSWORD: password }
+      });
+      assert.equal(result.external, true);
+      assert.equal(result.password, password);
+      assert.ok(authorizedRequests >= 1, "the health check must send Basic auth");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+);
+
 test("ensureServer keeps a single lease for repeated calls from the same process", async () => {
   const url = "http://127.0.0.1:1";
   const workspace = makeTempDir();

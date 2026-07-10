@@ -4,7 +4,14 @@ import path from "node:path";
 import { buildOpenCodeImportDocumentFromClaudeJsonl } from "./claude-session-transfer.mjs";
 import { createTempDir, readJsonFile, writeJsonFile } from "./fs.mjs";
 import { OpencodeHttpError, OpencodeServerClient } from "./opencode-server.mjs";
-import { SERVER_URL_ENV, ensureServer, loadServerSession } from "./server-lifecycle.mjs";
+import {
+  SERVER_PASSWORD_ENV,
+  SERVER_URL_ENV,
+  SERVER_USERNAME_ENV,
+  ensureServer,
+  loadServerSession,
+  serverSessionCredentials
+} from "./server-lifecycle.mjs";
 import { binaryAvailable, runCommandChecked } from "./process.mjs";
 
 const TASK_SESSION_PREFIX = "OpenCode Companion Task";
@@ -844,14 +851,32 @@ async function withServer(cwd, fn) {
   if (!server?.url) {
     throw new Error("OpenCode server did not become ready.");
   }
-  return fn(new OpencodeServerClient(server.url), server);
+  return fn(new OpencodeServerClient(server.url, serverSessionCredentials(server)), server);
 }
 
-async function abortSessionAtUrl(serverUrl, threadId, timeoutMs = 1000) {
+// A job record only stores the server URL, so a later cancel process must
+// re-derive credentials: the workspace's persisted owned-server session first,
+// then the ambient external-server variables.
+function resolveCredentialsForServerUrl(cwd, serverUrl) {
+  const normalized = normalizeServerUrlForCompare(serverUrl);
+  const session = loadServerSession(cwd);
+  if (session?.url && normalizeServerUrlForCompare(session.url) === normalized) {
+    return serverSessionCredentials(session);
+  }
+  if (normalizeServerUrlForCompare(process.env[SERVER_URL_ENV]) === normalized) {
+    return {
+      password: process.env[SERVER_PASSWORD_ENV] || null,
+      username: process.env[SERVER_USERNAME_ENV] || undefined
+    };
+  }
+  return { password: null, username: undefined };
+}
+
+async function abortSessionAtUrl(serverUrl, threadId, timeoutMs = 1000, credentials = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const client = new OpencodeServerClient(serverUrl);
+    const client = new OpencodeServerClient(serverUrl, credentials);
     await client.abort(threadId, { signal: controller.signal });
   } finally {
     clearTimeout(timeout);
@@ -1002,7 +1027,7 @@ export async function interruptServerTurn(cwd, { threadId, serverUrl = null }) {
 
   if (serverUrl) {
     try {
-      await abortSessionAtUrl(serverUrl, threadId);
+      await abortSessionAtUrl(serverUrl, threadId, 1000, resolveCredentialsForServerUrl(cwd, serverUrl));
       const serverExternal = normalizeServerUrlForCompare(serverUrl) === normalizeServerUrlForCompare(process.env[SERVER_URL_ENV]);
       return {
         attempted: true,
@@ -1044,7 +1069,7 @@ export async function interruptServerTurn(cwd, { threadId, serverUrl = null }) {
     if (!usedServerUrl) {
       throw new Error("OpenCode server did not become ready.");
     }
-    const client = new OpencodeServerClient(usedServerUrl);
+    const client = new OpencodeServerClient(usedServerUrl, serverSessionCredentials(server));
     await client.abort(threadId);
     return {
       attempted: true,

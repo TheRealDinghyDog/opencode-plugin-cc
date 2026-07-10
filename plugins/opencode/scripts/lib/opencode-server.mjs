@@ -17,6 +17,20 @@ function trimBaseUrl(url) {
   return String(url ?? "").replace(/\/+$/, "");
 }
 
+// Matches OpenCode's own client convention: HTTP Basic with the password from
+// OPENCODE_SERVER_PASSWORD and a username defaulting to "opencode". On a
+// password-protected server (v1.17.15) every route requires this header,
+// including /global/health and the /event stream.
+export function buildBasicAuthHeader(credentials = {}) {
+  const password = typeof credentials.password === "string" && credentials.password ? credentials.password : null;
+  if (!password) {
+    return null;
+  }
+  const username =
+    typeof credentials.username === "string" && credentials.username ? credentials.username : "opencode";
+  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+}
+
 function encodePathSegment(value) {
   return encodeURIComponent(String(value));
 }
@@ -210,6 +224,7 @@ export class OpencodeServerClient {
   constructor(baseUrl, options = {}) {
     this.baseUrl = trimBaseUrl(baseUrl);
     this.fetch = options.fetch ?? globalThis.fetch;
+    this.authorization = buildBasicAuthHeader(options);
     if (!this.baseUrl) {
       throw new Error("OpenCode server URL is required.");
     }
@@ -223,13 +238,20 @@ export class OpencodeServerClient {
     return `${this.baseUrl}${suffix}`;
   }
 
+  authHeaders() {
+    return this.authorization ? { authorization: this.authorization } : {};
+  }
+
   async request(method, path, options = {}) {
     const url = this.url(path);
     if (options.freshConnection) {
       return requestWithFreshConnection(new URL(url), {
         method,
         path,
-        headers: options.headers,
+        headers: {
+          ...this.authHeaders(),
+          ...(options.headers ?? {})
+        },
         body: options.body,
         signal: options.signal,
         requestTimeoutMs: options.requestTimeoutMs
@@ -238,6 +260,7 @@ export class OpencodeServerClient {
 
     const headers = {
       ...(options.body == null ? {} : { "content-type": "application/json" }),
+      ...this.authHeaders(),
       ...(options.headers ?? {})
     };
     const response = await this.fetch(url, {
@@ -333,7 +356,8 @@ export class OpencodeServerClient {
     const response = await this.fetch(this.url("/event"), {
       method: "GET",
       headers: {
-        accept: "text/event-stream"
+        accept: "text/event-stream",
+        ...this.authHeaders()
       },
       signal: options.signal
     });
