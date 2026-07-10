@@ -5,7 +5,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { resolveJobFile, resolveJobLogFile, resolveStateDir, resolveStateFile, saveState } from "../plugins/opencode/scripts/lib/state.mjs";
+import {
+  resolveJobFile,
+  resolveJobLogFile,
+  resolveStateDir,
+  resolveStateFile,
+  saveState,
+  withStateLock,
+  withStateLockAsync
+} from "../plugins/opencode/scripts/lib/state.mjs";
 
 function withoutPluginData(fn) {
   const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
@@ -120,4 +128,65 @@ test("saveState prunes dropped job artifacts when indexed jobs exceed the cap", 
         .sort()
     );
   });
+});
+
+test("withStateLockAsync yields to timers while another process holds the lock", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const lockDir = path.join(resolveStateDir(workspace), "state.lock");
+  fs.mkdirSync(lockDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(lockDir, "owner.json"),
+    `${JSON.stringify({ pid: process.pid, token: "other-holder", createdAt: new Date().toISOString() })}\n`,
+    "utf8"
+  );
+
+  const startedAt = Date.now();
+  const timerDelay = new Promise((resolve) => setTimeout(() => resolve(Date.now() - startedAt), 25));
+  const releaseTimer = setTimeout(() => fs.rmSync(lockDir, { recursive: true, force: true }), 100);
+
+  try {
+    const lockPromise = withStateLockAsync(workspace, () => {}, { lockPollMs: 1000 });
+    assert.ok((await timerDelay) < 500, "the event loop should process timers before the next lock poll");
+    await lockPromise;
+  } finally {
+    clearTimeout(releaseTimer);
+    fs.rmSync(lockDir, { recursive: true, force: true });
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("withStateLock waits for stale-lock takeover by default", () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const lockDir = path.join(resolveStateDir(workspace), "state.lock");
+  fs.mkdirSync(lockDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(lockDir, "owner.json"),
+    `${JSON.stringify({ pid: process.pid, token: "stuck-holder", createdAt: new Date().toISOString() })}\n`,
+    "utf8"
+  );
+
+  try {
+    const startedAt = Date.now();
+    const acquired = withStateLock(workspace, () => true, { lockPollMs: 25, lockStaleMs: 5600 });
+
+    assert.equal(acquired, true);
+    assert.ok(Date.now() - startedAt >= 5500, "the lock should be acquired by stale takeover after the old five-second deadline");
+  } finally {
+    fs.rmSync(lockDir, { recursive: true, force: true });
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
 });

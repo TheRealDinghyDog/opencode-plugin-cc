@@ -1,11 +1,14 @@
 import http from "node:http";
 import net from "node:net";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
 import { ensureServer, isServerHealthy, loadServerSession, saveServerSession, teardownServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+import { resolveStateDir } from "../plugins/opencode/scripts/lib/state.mjs";
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {
@@ -249,6 +252,191 @@ test("teardownServerSession still skips ignored self lease when another process 
     );
   } finally {
     otherLeaseHolder.kill();
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("teardownServerSession returns a bounded diagnostic when the server lock is contended", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const lockDir = path.join(resolveStateDir(workspace), "server.lock");
+  fs.mkdirSync(lockDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(lockDir, "owner.json"),
+    `${JSON.stringify({ pid: process.pid, token: "other-holder", createdAt: new Date().toISOString() })}\n`,
+    "utf8"
+  );
+
+  let teardownPromise;
+  let testTimeout;
+  try {
+    const startedAt = Date.now();
+    teardownPromise = teardownServerSession({
+      cwd: workspace,
+      lockAcquireTimeoutMs: 100,
+      lockPollMs: 25
+    });
+    const result = await Promise.race([
+      teardownPromise,
+      new Promise((resolve) => {
+        testTimeout = setTimeout(() => resolve({ testTimeout: true }), 500);
+      })
+    ]);
+
+    assert.equal(result.testTimeout, undefined, "teardown should not wait indefinitely for a live lock holder");
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, "lock-timeout");
+    assert.match(result.diagnostic, /Timed out acquiring the OpenCode server lock/);
+    assert.ok(Date.now() - startedAt < 500, "teardown should honor its acquisition deadline");
+  } finally {
+    clearTimeout(testTimeout);
+    fs.rmSync(lockDir, { recursive: true, force: true });
+    await teardownPromise?.catch(() => {});
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("ensureServer rejects when its bounded server lock acquisition times out", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  const previousFetch = globalThis.fetch;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const url = "http://127.0.0.1:1";
+  const lockDir = path.join(resolveStateDir(workspace), "server.lock");
+  saveServerSession(workspace, {
+    url,
+    pid: 123456,
+    pidFile: null,
+    logFile: null,
+    sessionDir: null,
+    external: false
+  });
+  fs.mkdirSync(lockDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(lockDir, "owner.json"),
+    `${JSON.stringify({ pid: process.pid, token: "other-holder", createdAt: new Date().toISOString() })}\n`,
+    "utf8"
+  );
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+
+  try {
+    await assert.rejects(
+      ensureServer(workspace, { lockAcquireTimeoutMs: 100, lockPollMs: 25 }),
+      /Timed out acquiring the OpenCode server lock/
+    );
+    assert.equal(loadServerSession(workspace).url, url);
+  } finally {
+    fs.rmSync(lockDir, { recursive: true, force: true });
+    globalThis.fetch = previousFetch;
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("teardownServerSession expires a lease whose pid reports EPERM", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  const originalKill = process.kill;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const session = {
+    url: "http://127.0.0.1:1",
+    pid: 123456,
+    pidFile: null,
+    logFile: null,
+    sessionDir: null,
+    external: false,
+    leases: [
+      {
+        pid: process.pid,
+        token: "foreign-owner-pid",
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      }
+    ]
+  };
+  saveServerSession(workspace, session);
+  process.kill = (pid, signal) => {
+    if (pid === process.pid && signal === 0) {
+      const error = new Error("operation not permitted");
+      error.code = "EPERM";
+      throw error;
+    }
+    return originalKill(pid, signal);
+  };
+
+  try {
+    let killedPid = null;
+    const result = await teardownServerSession({
+      cwd: workspace,
+      url: session.url,
+      pid: session.pid,
+      killProcess: (pid) => {
+        killedPid = pid;
+      }
+    });
+
+    assert.equal(result.skipped, false);
+    assert.equal(killedPid, session.pid);
+    assert.equal(loadServerSession(workspace), null);
+  } finally {
+    process.kill = originalKill;
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("saveServerSession preserves the existing session when its atomic rename fails", () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const originalSession = {
+    url: "http://127.0.0.1:1",
+    pid: 123456,
+    pidFile: null,
+    logFile: null,
+    sessionDir: null,
+    external: false
+  };
+  const replacementSession = { ...originalSession, url: "http://127.0.0.1:2" };
+  const originalRename = fs.renameSync;
+
+  try {
+    saveServerSession(workspace, originalSession);
+    fs.renameSync = () => {
+      throw new Error("simulated rename failure");
+    };
+
+    assert.throws(() => saveServerSession(workspace, replacementSession), /simulated rename failure/);
+    assert.deepEqual(loadServerSession(workspace), originalSession);
+    assert.equal(
+      fs.readdirSync(resolveStateDir(workspace)).some((name) => name.startsWith("server.json.tmp-")),
+      false
+    );
+  } finally {
+    fs.renameSync = originalRename;
     if (previousPluginDataDir == null) {
       delete process.env.CLAUDE_PLUGIN_DATA;
     } else {

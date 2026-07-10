@@ -33,9 +33,8 @@ import {
   listJobs,
   resolveJobLogFile,
   setConfig,
-  updateState,
-  upsertJob,
-  withStateLock,
+  updateStateAsync,
+  withStateLockAsync,
   writeJobFile
 } from "./lib/state.mjs";
 import {
@@ -614,12 +613,12 @@ function spawnDetachedTaskWorker(cwd, jobId) {
   return child;
 }
 
-function markQueuedTaskSpawned(workspaceRoot, jobId, pid) {
+async function markQueuedTaskSpawned(workspaceRoot, jobId, pid) {
   if (pid == null) {
     return;
   }
 
-  updateState(workspaceRoot, (state) => {
+  await updateStateAsync(workspaceRoot, (state) => {
     const storedJob = readStoredJob(workspaceRoot, jobId);
     if (storedJob?.status === "completed" || storedJob?.status === "failed" || storedJob?.status === "cancelled") {
       return;
@@ -638,12 +637,12 @@ function markQueuedTaskSpawned(workspaceRoot, jobId, pid) {
   });
 }
 
-function markQueuedTaskSpawnFailed(workspaceRoot, jobId, logFile, error) {
+async function markQueuedTaskSpawnFailed(workspaceRoot, jobId, logFile, error) {
   const errorMessage = error instanceof Error ? error.message : String(error);
   const completedAt = nowIso();
   appendLogLine(logFile, `Failed to start background task worker: ${errorMessage}`);
 
-  updateState(workspaceRoot, (state) => {
+  await updateStateAsync(workspaceRoot, (state) => {
     const storedJob = readStoredJob(workspaceRoot, jobId);
     const failedJob = {
       ...(storedJob ?? { id: jobId }),
@@ -665,7 +664,7 @@ function markQueuedTaskSpawnFailed(workspaceRoot, jobId, logFile, error) {
   });
 }
 
-function enqueueBackgroundTask(cwd, job, request) {
+async function enqueueBackgroundTask(cwd, job, request) {
   const { logFile } = createTrackedProgress(job);
   appendLogLine(logFile, "Queued for background execution.");
 
@@ -678,19 +677,21 @@ function enqueueBackgroundTask(cwd, job, request) {
     request
   };
   writeJobFile(job.workspaceRoot, job.id, queuedRecord);
-  upsertJob(job.workspaceRoot, queuedRecord);
+  await updateStateAsync(job.workspaceRoot, (state) => {
+    applyJobPatch(state, queuedRecord);
+  });
 
   let child;
   try {
     child = spawnDetachedTaskWorker(cwd, job.id);
   } catch (error) {
-    markQueuedTaskSpawnFailed(job.workspaceRoot, job.id, logFile, error);
+    await markQueuedTaskSpawnFailed(job.workspaceRoot, job.id, logFile, error);
     throw error;
   }
   child.once("error", (error) => {
-    markQueuedTaskSpawnFailed(job.workspaceRoot, job.id, logFile, error);
+    void markQueuedTaskSpawnFailed(job.workspaceRoot, job.id, logFile, error);
   });
-  markQueuedTaskSpawned(job.workspaceRoot, job.id, child.pid ?? null);
+  await markQueuedTaskSpawned(job.workspaceRoot, job.id, child.pid ?? null);
 
   return {
     payload: {
@@ -800,7 +801,7 @@ async function handleTask(argv) {
       stopReview,
       jobId: job.id
     });
-    const { payload } = enqueueBackgroundTask(cwd, job, request);
+    const { payload } = await enqueueBackgroundTask(cwd, job, request);
     outputCommandResult(payload, renderQueuedTaskLaunch(payload), options.json);
     return;
   }
@@ -980,8 +981,8 @@ function terminalJobIndexPatch(job) {
   );
 }
 
-function syncTerminalJobIndex(workspaceRoot, job) {
-  updateState(workspaceRoot, (state) => {
+async function syncTerminalJobIndex(workspaceRoot, job) {
+  await updateStateAsync(workspaceRoot, (state) => {
     applyJobPatch(state, terminalJobIndexPatch(job));
   });
   return {
@@ -990,9 +991,9 @@ function syncTerminalJobIndex(workspaceRoot, job) {
   };
 }
 
-function readCurrentCancelJob(workspaceRoot, job) {
+async function readCurrentCancelJob(workspaceRoot, job) {
   let currentJob = job;
-  withStateLock(workspaceRoot, () => {
+  await withStateLockAsync(workspaceRoot, () => {
     const stateJob = listJobs(workspaceRoot).find((candidate) => candidate.id === job.id) ?? null;
     const storedJob = readStoredJob(workspaceRoot, job.id);
     currentJob = {
@@ -1004,11 +1005,11 @@ function readCurrentCancelJob(workspaceRoot, job) {
   return currentJob;
 }
 
-function cancelJobIfStillActive(workspaceRoot, job, completedAt) {
+async function cancelJobIfStillActive(workspaceRoot, job, completedAt) {
   let cancelled = false;
   let nextJob = job;
 
-  updateState(workspaceRoot, (state) => {
+  await updateStateAsync(workspaceRoot, (state) => {
     const stateJob = state.jobs.find((candidate) => candidate.id === job.id) ?? null;
     const storedJob = readStoredJob(workspaceRoot, job.id);
     const currentJob = {
@@ -1062,10 +1063,10 @@ async function handleCancel(argv) {
   const cwd = resolveCommandCwd(options);
   const reference = positionals[0] ?? "";
   const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { env: process.env });
-  const currentJob = readCurrentCancelJob(workspaceRoot, job);
+  const currentJob = await readCurrentCancelJob(workspaceRoot, job);
 
   if (isTerminalStatus(currentJob.status)) {
-    const syncedJob = syncTerminalJobIndex(workspaceRoot, currentJob);
+    const syncedJob = await syncTerminalJobIndex(workspaceRoot, currentJob);
     const payload = {
       jobId: syncedJob.id,
       status: syncedJob.status,
@@ -1084,7 +1085,7 @@ async function handleCancel(argv) {
 
   const interrupt = await interruptServerTurn(cwd, { threadId, serverUrl });
   const completedAt = nowIso();
-  const cancelResult = cancelJobIfStillActive(workspaceRoot, currentJob, completedAt);
+  const cancelResult = await cancelJobIfStillActive(workspaceRoot, currentJob, completedAt);
   if (cancelResult.cancelled) {
     const cancelLogFile =
       cancelResult.job.logFile ?? currentJob.logFile ?? job.logFile ?? resolveJobLogFile(workspaceRoot, cancelResult.job.id);

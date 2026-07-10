@@ -17,6 +17,10 @@ const DEFAULT_LOCK_STALE_MS = 30000;
 const DEFAULT_LOCK_POLL_MS = 25;
 const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -138,48 +142,103 @@ function releaseStateLock(lockDir, token) {
   removeStateLock(lockDir);
 }
 
-function acquireStateLock(cwd, options = {}) {
+function stateLockOptions(cwd, options = {}) {
   const stateDir = resolveStateDir(cwd);
   fs.mkdirSync(stateDir, { recursive: true });
 
-  const lockDir = resolveStateLockDir(cwd);
-  const staleMs = Math.max(1000, Number(options.lockStaleMs) || DEFAULT_LOCK_STALE_MS);
-  const pollMs = Math.max(10, Number(options.lockPollMs) || DEFAULT_LOCK_POLL_MS);
-  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return {
+    lockDir: resolveStateLockDir(cwd),
+    staleMs: Math.max(1000, Number(options.lockStaleMs) || DEFAULT_LOCK_STALE_MS),
+    pollMs: Math.max(10, Number(options.lockPollMs) || DEFAULT_LOCK_POLL_MS),
+    token: `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  };
+}
 
-  for (;;) {
-    try {
-      fs.mkdirSync(lockDir);
-    } catch (error) {
-      if (error?.code !== "EEXIST") {
-        throw error;
-      }
-      if (isStateLockStale(lockDir, staleMs)) {
-        stealStaleStateLock(lockDir);
-      }
-      Atomics.wait(sleepBuffer, 0, 0, pollMs);
-      continue;
-    }
+function lockAcquisitionDeadline(options) {
+  if (options.lockAcquireTimeoutMs == null) {
+    return null;
+  }
 
-    try {
-      fs.writeFileSync(
-        path.join(lockDir, LOCK_INFO_FILE),
-        `${JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }, null, 2)}\n`,
-        "utf8"
-      );
-    } catch (error) {
-      removeStateLock(lockDir);
+  const timeoutMs = Number(options.lockAcquireTimeoutMs);
+  return Number.isFinite(timeoutMs) && timeoutMs >= 0 ? Date.now() + timeoutMs : null;
+}
+
+function tryAcquireStateLock(lockDir, staleMs, token) {
+  try {
+    fs.mkdirSync(lockDir);
+  } catch (error) {
+    if (error?.code !== "EEXIST") {
       throw error;
     }
+    if (isStateLockStale(lockDir, staleMs)) {
+      stealStaleStateLock(lockDir);
+    }
+    return null;
+  }
 
-    return () => releaseStateLock(lockDir, token);
+  try {
+    fs.writeFileSync(
+      path.join(lockDir, LOCK_INFO_FILE),
+      `${JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }, null, 2)}\n`,
+      "utf8"
+    );
+  } catch (error) {
+    removeStateLock(lockDir);
+    throw error;
+  }
+
+  return () => releaseStateLock(lockDir, token);
+}
+
+function acquireStateLock(cwd, options = {}) {
+  const { lockDir, staleMs, pollMs, token } = stateLockOptions(cwd, options);
+  const deadline = lockAcquisitionDeadline(options);
+
+  for (;;) {
+    const release = tryAcquireStateLock(lockDir, staleMs, token);
+    if (release) {
+      return release;
+    }
+    if (deadline != null && Date.now() >= deadline) {
+      throw new Error("Timed out acquiring the OpenCode state lock.");
+    }
+    Atomics.wait(sleepBuffer, 0, 0, deadline == null ? pollMs : Math.min(pollMs, Math.max(1, deadline - Date.now())));
   }
 }
 
-export function withStateLock(cwd, fn) {
-  const release = acquireStateLock(cwd);
+async function acquireStateLockAsync(cwd, options = {}) {
+  const { lockDir, staleMs, pollMs, token } = stateLockOptions(cwd, options);
+  const deadline = lockAcquisitionDeadline(options);
+
+  for (;;) {
+    const release = tryAcquireStateLock(lockDir, staleMs, token);
+    if (release) {
+      return release;
+    }
+    if (deadline != null && Date.now() >= deadline) {
+      throw new Error("Timed out acquiring the OpenCode state lock.");
+    }
+    await sleep(deadline == null ? pollMs : Math.min(pollMs, Math.max(1, deadline - Date.now())));
+  }
+}
+
+// The synchronous API remains for callers that need a synchronous return value.
+// It waits for acquisition or stale-lock recovery unless callers opt into a
+// lockAcquireTimeoutMs deadline. Async command and hook paths should use
+// withStateLockAsync so lock contention yields the Node event loop.
+export function withStateLock(cwd, fn, options = {}) {
+  const release = acquireStateLock(cwd, options);
   try {
     return fn();
+  } finally {
+    release();
+  }
+}
+
+export async function withStateLockAsync(cwd, fn, options = {}) {
+  const release = await acquireStateLockAsync(cwd, options);
+  try {
+    return await fn();
   } finally {
     release();
   }
@@ -223,7 +282,7 @@ function removeFileIfExists(filePath) {
   }
 }
 
-function atomicWriteFile(filePath, contents) {
+export function atomicWriteFile(filePath, contents) {
   const tempFile = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   try {
     fs.writeFileSync(tempFile, contents, "utf8");
@@ -294,6 +353,15 @@ export function updateState(cwd, mutate) {
     mutate(state);
     return saveStateUnlocked(cwd, state, previousJobs);
   });
+}
+
+export function updateStateAsync(cwd, mutate, options = {}) {
+  return withStateLockAsync(cwd, () => {
+    const state = loadStateUnlocked(cwd);
+    const previousJobs = [...state.jobs];
+    mutate(state);
+    return saveStateUnlocked(cwd, state, previousJobs);
+  }, options);
 }
 
 export function generateJobId(prefix = "job") {

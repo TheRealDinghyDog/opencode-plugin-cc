@@ -6,7 +6,7 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 
 import { OpencodeServerClient } from "./opencode-server.mjs";
-import { resolveStateDir } from "./state.mjs";
+import { atomicWriteFile, resolveStateDir } from "./state.mjs";
 
 export const SERVER_URL_ENV = "OPENCODE_COMPANION_SERVER_URL";
 export const PID_FILE_ENV = "OPENCODE_COMPANION_SERVER_PID_FILE";
@@ -57,7 +57,7 @@ export function loadServerSession(cwd) {
 export function saveServerSession(cwd, session) {
   const stateDir = resolveStateDir(cwd);
   fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(resolveServerStateFile(cwd), `${JSON.stringify(session, null, 2)}\n`, "utf8");
+  atomicWriteFile(resolveServerStateFile(cwd), `${JSON.stringify(session, null, 2)}\n`);
 }
 
 export function clearServerSession(cwd) {
@@ -112,7 +112,7 @@ function processIsAlive(pid) {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return error?.code === "EPERM";
+    return error?.code === "EPERM" ? null : false;
   }
 }
 
@@ -212,8 +212,10 @@ function isLeaseActive(lease, nowMs = Date.now()) {
     return false;
   }
 
-  const alive = processIsAlive(Number(lease?.pid));
-  return alive !== false;
+  // Leases are created by this plugin, so an EPERM response cannot prove that
+  // the pid still belongs to the lease owner. Keep the long TTL for legitimate
+  // sessions, but do not let an inaccessible, reused foreign pid hold teardown.
+  return processIsAlive(Number(lease?.pid)) === true;
 }
 
 function pruneServerLeases(session) {
@@ -253,6 +255,8 @@ async function acquireServerLock(cwd, options = {}) {
   const lockDir = resolveServerLockDir(cwd);
   const staleMs = Math.max(1000, Number(options.lockStaleMs) || DEFAULT_LOCK_STALE_MS);
   const pollMs = Math.max(25, Number(options.lockPollMs) || DEFAULT_LOCK_POLL_MS);
+  const requestedTimeoutMs = options.lockAcquireTimeoutMs == null ? Number.NaN : Number(options.lockAcquireTimeoutMs);
+  const deadline = Number.isFinite(requestedTimeoutMs) && requestedTimeoutMs >= 0 ? Date.now() + requestedTimeoutMs : null;
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   for (;;) {
@@ -268,7 +272,10 @@ async function acquireServerLock(cwd, options = {}) {
       if (isServerLockStale(lockDir, staleMs)) {
         stealStaleServerLock(lockDir);
       }
-      await sleep(pollMs);
+      if (deadline != null && Date.now() >= deadline) {
+        return null;
+      }
+      await sleep(deadline == null ? pollMs : Math.min(pollMs, Math.max(1, deadline - Date.now())));
       continue;
     }
 
@@ -366,6 +373,9 @@ export async function ensureServer(cwd, options = {}) {
   }
 
   const lock = await acquireServerLock(cwd, options);
+  if (!lock) {
+    throw new Error("Timed out acquiring the OpenCode server lock.");
+  }
 
   try {
     const lockedExisting = await loadHealthyServerSession(cwd, options.healthTimeoutMs ?? 500);
@@ -485,6 +495,9 @@ export async function teardownServerSession({
   cwd = null,
   force = false,
   ignoreCurrentProcessLease = false,
+  lockAcquireTimeoutMs = null,
+  lockPollMs = null,
+  lockStaleMs = null,
   url = null,
   pidFile = null,
   logFile = null,
@@ -505,7 +518,14 @@ export async function teardownServerSession({
     });
   }
 
-  const lock = await acquireServerLock(cwd);
+  const lock = await acquireServerLock(cwd, { lockAcquireTimeoutMs, lockPollMs, lockStaleMs });
+  if (!lock) {
+    return {
+      skipped: true,
+      reason: "lock-timeout",
+      diagnostic: "Timed out acquiring the OpenCode server lock for teardown."
+    };
+  }
   try {
     const current = loadServerSession(cwd);
     const currentUrl = normalizeUrl(current?.url);
