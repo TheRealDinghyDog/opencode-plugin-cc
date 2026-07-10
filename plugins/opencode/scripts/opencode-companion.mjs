@@ -790,10 +790,12 @@ async function handleTask(argv) {
     ensureOpenCodeAvailable(cwd);
     requireTaskRequest(prompt, resumeLast);
 
-    const currentServerUrl = getSessionRuntimeStatus(process.env, workspaceRoot).url ?? null;
+    const runtime = getSessionRuntimeStatus(process.env, workspaceRoot);
     const job = {
       ...buildTaskJob(workspaceRoot, taskMetadata, write),
-      ...(currentServerUrl ? { serverUrl: currentServerUrl } : {})
+      // Persist ownership with the URL at job start; a later cancel process
+      // must not re-derive it from its own environment (issue #29).
+      ...(runtime.url ? { serverUrl: runtime.url, serverExternal: Boolean(runtime.external) } : {})
     };
     const request = buildTaskRequest({
       cwd,
@@ -1086,8 +1088,9 @@ async function handleCancel(argv) {
 
   const threadId = currentJob.threadId ?? null;
   const serverUrl = currentJob.serverUrl ?? null;
+  const serverExternal = typeof currentJob.serverExternal === "boolean" ? currentJob.serverExternal : null;
 
-  const interrupt = await interruptServerTurn(cwd, { threadId, serverUrl });
+  const interrupt = await interruptServerTurn(cwd, { threadId, serverUrl, serverExternal });
   const completedAt = nowIso();
   const cancelResult = await cancelJobIfStillActive(workspaceRoot, currentJob, completedAt);
   if (cancelResult.cancelled) {
@@ -1109,7 +1112,16 @@ async function handleCancel(argv) {
     }
     try {
       const teardownServerUrl = interrupt.serverUrl ?? serverUrl;
-      if (!interrupt.serverExternal) {
+      // Tear down only a server the job explicitly recorded as plugin-owned
+      // (serverExternal === false). When the job recorded a URL but no
+      // ownership (legacy records), fail safe and leave the server running —
+      // it may be a shared, user-managed service (issue #29). Jobs without a
+      // recorded URL fall back to the workspace's own persisted server unless
+      // the interrupt just connected to an env-configured external one.
+      const ownedServerTeardown = serverUrl
+        ? serverExternal === false
+        : interrupt.serverExternal !== true;
+      if (ownedServerTeardown) {
         await teardownServerSession({
           cwd: workspaceRoot,
           ignoreCurrentProcessLease: Boolean(interrupt.serverUrl && !serverUrl),

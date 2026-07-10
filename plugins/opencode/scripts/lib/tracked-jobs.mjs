@@ -24,6 +24,8 @@ function normalizeProgressEvent(value) {
       threadId: typeof value.threadId === "string" && value.threadId.trim() ? value.threadId.trim() : null,
       turnId: typeof value.turnId === "string" && value.turnId.trim() ? value.turnId.trim() : null,
       serverUrl: typeof value.serverUrl === "string" && value.serverUrl.trim() ? value.serverUrl.trim() : null,
+      // Tri-state: only an explicit boolean is persisted into the job record.
+      serverExternal: typeof value.serverExternal === "boolean" ? value.serverExternal : null,
       stderrMessage: value.stderrMessage == null ? null : String(value.stderrMessage).trim(),
       logTitle: typeof value.logTitle === "string" && value.logTitle.trim() ? value.logTitle.trim() : null,
       logBody: value.logBody == null ? null : String(value.logBody).trimEnd()
@@ -36,6 +38,7 @@ function normalizeProgressEvent(value) {
     threadId: null,
     turnId: null,
     serverUrl: null,
+    serverExternal: null,
     stderrMessage: String(value ?? "").trim(),
     logTitle: null,
     logBody: null
@@ -81,6 +84,7 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
   let lastThreadId = null;
   let lastTurnId = null;
   let lastServerUrl = null;
+  let lastServerExternal = null;
 
   return (event) => {
     const normalized = normalizeProgressEvent(event);
@@ -108,6 +112,12 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
     if (normalized.serverUrl && normalized.serverUrl !== lastServerUrl) {
       lastServerUrl = normalized.serverUrl;
       patch.serverUrl = normalized.serverUrl;
+      changed = true;
+    }
+
+    if (normalized.serverExternal != null && normalized.serverExternal !== lastServerExternal) {
+      lastServerExternal = normalized.serverExternal;
+      patch.serverExternal = normalized.serverExternal;
       changed = true;
     }
 

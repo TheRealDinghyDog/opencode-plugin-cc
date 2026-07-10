@@ -1040,12 +1040,29 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
   }
 }
 
+// The canonical (symlink-resolved) workspace path is what OpenCode records as
+// a session's directory, so use it for the client's directory scope.
+function canonicalWorkspaceDirectory(cwd) {
+  try {
+    return fs.realpathSync(cwd);
+  } catch {
+    return cwd;
+  }
+}
+
+function buildServerClient(cwd, server) {
+  return new OpencodeServerClient(server.url, {
+    ...serverSessionCredentials(server),
+    directory: canonicalWorkspaceDirectory(cwd)
+  });
+}
+
 async function withServer(cwd, fn) {
   const server = await ensureServer(cwd);
   if (!server?.url) {
     throw new Error("OpenCode server did not become ready.");
   }
-  return fn(new OpencodeServerClient(server.url, serverSessionCredentials(server)), server);
+  return fn(buildServerClient(cwd, server), server);
 }
 
 // A job record only stores the server URL, so a later cancel process must
@@ -1066,11 +1083,14 @@ function resolveCredentialsForServerUrl(cwd, serverUrl) {
   return { password: null, username: undefined };
 }
 
-async function abortSessionAtUrl(serverUrl, threadId, timeoutMs = 1000, credentials = {}) {
+async function abortSessionAtUrl(serverUrl, threadId, timeoutMs = 1000, credentials = {}, directory = null) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const client = new OpencodeServerClient(serverUrl, credentials);
+    const client = new OpencodeServerClient(serverUrl, {
+      ...credentials,
+      ...(directory ? { directory } : {})
+    });
     await client.abort(threadId, { signal: controller.signal });
   } finally {
     clearTimeout(timeout);
@@ -1142,14 +1162,18 @@ export function getAvailability(cwd) {
 }
 
 export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) {
-  const url = env?.[SERVER_URL_ENV] ?? loadServerSession(cwd)?.url ?? null;
+  const envUrl = env?.[SERVER_URL_ENV] ?? null;
+  const url = envUrl ?? loadServerSession(cwd)?.url ?? null;
   if (url) {
     return {
       mode: "shared",
       label: "shared OpenCode server",
       detail: "This Claude session is configured to reuse one shared OpenCode server.",
       endpoint: url,
-      url
+      url,
+      // Env-configured servers are user-managed; a persisted server session is
+      // one the plugin spawned and owns.
+      external: Boolean(envUrl)
     };
   }
 
@@ -1158,7 +1182,8 @@ export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) 
     label: "lazy OpenCode server startup",
     detail: "No shared OpenCode server is active yet. The first review or task command will start one on demand.",
     endpoint: null,
-    url: null
+    url: null,
+    external: false
   };
 }
 
@@ -1205,41 +1230,48 @@ export async function getAuthStatus(cwd) {
   }
 }
 
-export async function interruptServerTurn(cwd, { threadId, serverUrl = null }) {
+// `serverExternal` is the ownership flag persisted in the job record when the
+// job started. Historical ownership must never be inferred from the current
+// process environment — a cancel process without the job-start env would
+// otherwise mistake a user-managed server for a plugin-owned one (issue #29).
+export async function interruptServerTurn(cwd, { threadId, serverUrl = null, serverExternal = null }) {
+  const ownership = typeof serverExternal === "boolean" ? { serverExternal } : {};
   if (!threadId) {
-    const serverExternal =
-      serverUrl && normalizeServerUrlForCompare(serverUrl) === normalizeServerUrlForCompare(process.env[SERVER_URL_ENV]);
     return {
       attempted: false,
       interrupted: false,
       transport: null,
       detail: "missing OpenCode session id",
       ...(serverUrl ? { serverUrl } : {}),
-      ...(serverExternal ? { serverExternal: true } : {})
+      ...ownership
     };
   }
 
   if (serverUrl) {
     try {
-      await abortSessionAtUrl(serverUrl, threadId, 1000, resolveCredentialsForServerUrl(cwd, serverUrl));
-      const serverExternal = normalizeServerUrlForCompare(serverUrl) === normalizeServerUrlForCompare(process.env[SERVER_URL_ENV]);
+      await abortSessionAtUrl(
+        serverUrl,
+        threadId,
+        1000,
+        resolveCredentialsForServerUrl(cwd, serverUrl),
+        canonicalWorkspaceDirectory(cwd)
+      );
       return {
         attempted: true,
         interrupted: true,
         transport: "server",
         detail: `Aborted OpenCode session ${threadId}.`,
         serverUrl,
-        ...(serverExternal ? { serverExternal: true } : {})
+        ...ownership
       };
     } catch (error) {
-      const serverExternal = normalizeServerUrlForCompare(serverUrl) === normalizeServerUrlForCompare(process.env[SERVER_URL_ENV]);
       return {
         attempted: true,
         interrupted: false,
         transport: "server",
         detail: error instanceof Error ? error.message : String(error),
         serverUrl,
-        ...(serverExternal ? { serverExternal: true } : {})
+        ...ownership
       };
     }
   }
@@ -1263,7 +1295,7 @@ export async function interruptServerTurn(cwd, { threadId, serverUrl = null }) {
     if (!usedServerUrl) {
       throw new Error("OpenCode server did not become ready.");
     }
-    const client = new OpencodeServerClient(usedServerUrl, serverSessionCredentials(server));
+    const client = buildServerClient(cwd, server);
     await client.abort(threadId);
     return {
       attempted: true,
@@ -1300,7 +1332,10 @@ export async function runServerTurn(cwd, options = {}) {
 
   return withServer(cwd, async (client, server) => {
     emitProgress(options.onProgress, "Using shared OpenCode server.", "starting", {
-      serverUrl: server.url
+      serverUrl: server.url,
+      // Recorded into the job so a later cancel process knows whether this
+      // server is plugin-owned without consulting its own environment.
+      serverExternal: Boolean(server.external)
     });
 
     let sessionID = options.resumeThreadId ?? options.resumeSessionId ?? null;

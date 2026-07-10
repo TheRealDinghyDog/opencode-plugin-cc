@@ -41,6 +41,41 @@ test("buildBasicAuthHeader follows OpenCode's basic-auth convention", () => {
   assert.equal(buildBasicAuthHeader({ password: "" }), null);
 });
 
+test("client scopes project routes to the configured directory but never /global routes", async () => {
+  const seen = [];
+  const client = new OpencodeServerClient("http://opencode.test", {
+    directory: "/work/repo a",
+    fetch: async (requestUrl) => {
+      const url = new URL(String(requestUrl));
+      seen.push(url);
+      if (url.pathname === "/event") {
+        return new Response(":ok\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" }
+        });
+      }
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }
+  });
+
+  await client.listSessions();
+  await client.createSession({ agent: "plan" });
+  await client.subscribeEvents(() => {});
+  await client.health();
+  await client.dispose();
+
+  assert.equal(seen[0].pathname, "/session");
+  assert.equal(seen[0].searchParams.get("directory"), "/work/repo a");
+  assert.equal(seen[1].pathname, "/session");
+  assert.equal(seen[1].searchParams.get("directory"), "/work/repo a");
+  assert.equal(seen[2].pathname, "/event");
+  assert.equal(seen[2].searchParams.get("directory"), "/work/repo a");
+  assert.equal(seen[3].pathname, "/global/health");
+  assert.equal(seen[3].searchParams.get("directory"), null);
+  assert.equal(seen[4].pathname, "/global/dispose");
+  assert.equal(seen[4].searchParams.get("directory"), null);
+});
+
 test("client sends Basic auth on requests, fresh connections, and the event stream", { skip: LOCAL_LISTEN_SKIP }, async () => {
   const authorization = `Basic ${Buffer.from("opencode:secret").toString("base64")}`;
   const seen = [];
