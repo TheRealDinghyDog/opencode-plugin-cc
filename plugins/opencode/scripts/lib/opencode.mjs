@@ -377,6 +377,10 @@ function createTurnCaptureState(sessionID, options = {}) {
     finalMessage: "",
     structuredOutput: null,
     reasoningSummary: [],
+    // Latest snapshot of every streamed part, keyed by part id. Insertion
+    // order is preserved across snapshot replacements, which keeps text
+    // assembly stable while parts stream in (issue #28).
+    parts: new Map(),
     touchedFiles: new Set(),
     commandExecutions: [],
     error: null,
@@ -400,17 +404,21 @@ function labelForSession(state, sessionID) {
 }
 
 function trackSession(state, event) {
-  const sessionID = extractSessionId(event);
+  // Real session.created/session.updated events carry the Session object in
+  // `properties.info` (id, parentID, title, agent); other events only carry
+  // `properties.sessionID`.
+  const info = event?.properties?.info ?? event?.info ?? event?.session ?? null;
+  const sessionID = extractSessionId(event) ?? info?.id ?? null;
   if (!sessionID) {
     return;
   }
 
-  const parentID = extractParentSessionId(event);
+  const parentID = info?.parentID ?? extractParentSessionId(event);
   if (sessionID === state.sessionID || state.sessionIDs.has(parentID)) {
     state.sessionIDs.add(sessionID);
     const label =
-      event?.session?.title ??
-      event?.session?.agent ??
+      info?.title ??
+      info?.agent ??
       event?.agent ??
       event?.properties?.title ??
       event?.properties?.agent ??
@@ -501,6 +509,160 @@ function applyMessageParts(state, parts, sessionID) {
   }
 }
 
+function partIsAssembledText(part) {
+  return String(part?.type ?? "") === "text" && typeof part?.text === "string" && !part.synthetic && !part.ignored;
+}
+
+// Rebuild the main-session final message from streamed text-part snapshots.
+// Parts belong to messages, so assemble the text of one target message: the
+// turn's assistant message when known, otherwise the message of the newest
+// streamed text part (its parts still arrive in order).
+function rebuildMainSessionText(state, hintMessageID = null) {
+  const textParts = [];
+  for (const part of state.parts.values()) {
+    if ((part.sessionID ?? state.sessionID) !== state.sessionID || !partIsAssembledText(part)) {
+      continue;
+    }
+    textParts.push(part);
+  }
+  if (textParts.length === 0) {
+    return;
+  }
+
+  const candidates = [state.messageID, hintMessageID, textParts[textParts.length - 1].messageID];
+  const target = candidates.find((id) => id && textParts.some((part) => part.messageID === id));
+  const text = textParts
+    .filter((part) => (part.messageID ?? target) === target)
+    .map((part) => part.text)
+    .join("");
+  if (text) {
+    state.finalMessage = text;
+  }
+}
+
+// One streamed part snapshot (message.part.updated => properties.part). The
+// event carries the part's full current state, so replace by part id.
+function applyPartSnapshot(state, part) {
+  if (!part || typeof part !== "object" || !part.id) {
+    return;
+  }
+  const stored = { ...(state.parts.get(part.id) ?? {}), ...part };
+  state.parts.set(part.id, stored);
+
+  const sessionID = stored.sessionID ?? state.sessionID;
+  if (sessionID && !state.sessionIDs.has(sessionID)) {
+    return;
+  }
+  const subagentLabel = labelForSession(state, sessionID);
+  const type = String(stored.type ?? "");
+  const completed = Boolean(stored.time?.end) || stored.state?.status === "completed";
+
+  if (!subagentLabel) {
+    const structured = extractStructuredOutput([stored]);
+    if (structured !== undefined) {
+      state.structuredOutput = structured;
+    }
+  }
+
+  if (partIsAssembledText(stored)) {
+    if (!subagentLabel) {
+      rebuildMainSessionText(state, stored.messageID ?? null);
+      if (completed && stored.text) {
+        emitLogEvent(state.onProgress, {
+          message: `Assistant message captured: ${shorten(stored.text, 96)}`,
+          stderrMessage: null,
+          phase: "finalizing",
+          logTitle: "Assistant message",
+          logBody: stored.text
+        });
+      }
+    } else if (completed && stored.text) {
+      emitLogEvent(state.onProgress, {
+        message: `Subagent ${subagentLabel}: ${shorten(stored.text, 96)}`,
+        stderrMessage: null,
+        logTitle: `Subagent ${subagentLabel} message`,
+        logBody: stored.text
+      });
+    }
+    return;
+  }
+
+  if (type === "reasoning" && completed && stored.text) {
+    const reasoning = extractReasoningFromParts([stored]);
+    mergeReasoning(state, reasoning);
+    if (reasoning.length > 0) {
+      emitLogEvent(state.onProgress, {
+        message: subagentLabel
+          ? `Subagent ${subagentLabel} reasoning: ${shorten(reasoning[0], 96)}`
+          : `Reasoning summary captured: ${shorten(reasoning[0], 96)}`,
+        stderrMessage: null,
+        logTitle: subagentLabel ? `Subagent ${subagentLabel} reasoning summary` : "Reasoning summary",
+        logBody: reasoning.map((section) => `- ${section}`).join("\n")
+      });
+    }
+  }
+}
+
+// Incremental text (message.part.delta => {sessionID, messageID, partID,
+// field, delta}). Deltas only ever extend a part we already saw a snapshot
+// for; the next snapshot is authoritative and replaces the accumulated value.
+function applyPartDelta(state, props) {
+  const partID = typeof props?.partID === "string" ? props.partID : null;
+  const field = typeof props?.field === "string" ? props.field : null;
+  const delta = typeof props?.delta === "string" ? props.delta : null;
+  if (!partID || !field || delta == null) {
+    return;
+  }
+  const existing = state.parts.get(partID);
+  if (!existing) {
+    return;
+  }
+  existing[field] = (typeof existing[field] === "string" ? existing[field] : "") + delta;
+  if (partIsAssembledText(existing) && (existing.sessionID ?? state.sessionID) === state.sessionID) {
+    rebuildMainSessionText(state, existing.messageID ?? null);
+  }
+}
+
+function extractQuestionRequestId(event) {
+  // The question request id lives at properties.id (que_...); the envelope's
+  // own id is the evt_... event id and must not be used.
+  const id = event?.properties?.id;
+  return typeof id === "string" && id ? id : null;
+}
+
+function describeQuestions(event) {
+  const questions = Array.isArray(event?.properties?.questions) ? event.properties.questions : [];
+  const summary = questions
+    .map((question) => question?.header ?? question?.question)
+    .filter((value) => typeof value === "string" && value)
+    .slice(0, 2)
+    .join("; ");
+  return summary || null;
+}
+
+// OpenCode's question tool blocks its session on a deferred reply. Headless
+// runs have nobody to answer, so reject immediately — the model receives the
+// rejection and must proceed autonomously — instead of stalling the turn
+// until the outer timeout (issue #28 / review M-02).
+async function respondToQuestion(client, state, event) {
+  const requestID = extractQuestionRequestId(event);
+  if (!requestID) {
+    return;
+  }
+  const described = describeQuestions(event);
+  emitProgress(
+    state.onProgress,
+    `Rejecting OpenCode question ${requestID}${described ? ` (${shorten(described, 96)})` : ""}: headless runs cannot answer interactive questions.`,
+    "running"
+  );
+  try {
+    await client.rejectQuestion(requestID);
+  } catch (error) {
+    state.error = error;
+    emitProgress(state.onProgress, `OpenCode question rejection failed: ${error.message}`, "failed");
+  }
+}
+
 function describePermissionRequest(event) {
   const category =
     (typeof event?.permission === "string" ? event.permission : null) ??
@@ -581,14 +743,46 @@ async function applyOpenCodeEvent(client, state, event, meta = {}) {
     return;
   }
 
+  if (type === "session.created" || type === "session.updated") {
+    // Child registration already happened in trackSession above.
+    return;
+  }
+
   if (type === "permission.asked" || type === "permission.v2.asked") {
     await respondToPermission(client, state, event, sessionID ?? state.sessionID);
     return;
   }
 
+  if (type === "question.asked" || type === "question.v2.asked") {
+    await respondToQuestion(client, state, event);
+    return;
+  }
+
   if (type === "message.updated") {
-    state.messageID = event?.message?.id ?? event?.info?.id ?? event?.id ?? state.messageID;
-    applyMessageParts(state, extractMessageParts(event), sessionID ?? state.sessionID);
+    // Metadata only in the real contract: properties.info carries the Message.
+    // Parts arrive separately via message.part.updated / message.part.delta.
+    const info = event?.properties?.info ?? event?.info ?? event?.message ?? null;
+    const infoSessionID = info?.sessionID ?? sessionID ?? state.sessionID;
+    if (info?.role === "assistant" && infoSessionID === state.sessionID) {
+      if (typeof info.id === "string" && info.id) {
+        state.messageID = info.id;
+        rebuildMainSessionText(state);
+      }
+      // json_schema output also lands on the assistant message itself.
+      if (info.structured !== undefined) {
+        state.structuredOutput = info.structured;
+      }
+    }
+    return;
+  }
+
+  if (type === "message.part.updated") {
+    applyPartSnapshot(state, event?.properties?.part ?? event?.part ?? null);
+    return;
+  }
+
+  if (type === "message.part.delta") {
+    applyPartDelta(state, event?.properties ?? null);
     return;
   }
 

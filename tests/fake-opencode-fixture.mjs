@@ -38,6 +38,7 @@ const path = require("node:path");
 const STATE_PATH = process.env.FAKE_OPENCODE_STATE_PATH || ${JSON.stringify(statePath)};
 const clients = new Set();
 const pendingPermissions = new Map();
+const pendingQuestions = new Map();
 
 function loadState() {
   if (!fs.existsSync(STATE_PATH)) {
@@ -86,11 +87,45 @@ function sendJson(res, value, status = 200) {
   res.end(JSON.stringify(value));
 }
 
-function emit(event) {
-  const line = "data: " + JSON.stringify(event) + "\\n\\n";
+// Real event envelope (pinned in tests/opencode-event-contract.json):
+// { id: "evt_...", type, properties }.
+let nextEventId = 1;
+function emit(type, properties) {
+  const line = "data: " + JSON.stringify({ id: "evt_" + nextEventId++, type, properties }) + "\\n\\n";
   for (const client of clients) {
     client.write(line);
   }
+}
+
+function sessionInfo(session, parentID) {
+  return {
+    id: session.id,
+    slug: "fake-" + session.id,
+    projectID: "prj_fake",
+    directory: session.directory || process.cwd(),
+    title: session.title || "",
+    version: "1.17.15",
+    time: { created: Date.now(), updated: Date.now() },
+    ...(session.agent ? { agent: session.agent } : {}),
+    ...(parentID ? { parentID } : {})
+  };
+}
+
+function assistantInfo(sessionID, messageID, agent) {
+  return {
+    id: messageID,
+    sessionID,
+    role: "assistant",
+    time: { created: Date.now() },
+    parentID: messageID + "_user",
+    modelID: "fake-model",
+    providerID: "fake",
+    mode: "normal",
+    agent: agent || "build",
+    path: { cwd: process.cwd(), root: process.cwd() },
+    cost: 0,
+    tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+  };
 }
 
 function textFromMessage(body) {
@@ -148,6 +183,7 @@ function structuredOutputParts(body) {
       {
         type: "tool",
         tool: "StructuredOutput",
+        callID: "call_structured_1",
         state: {
           status: "completed",
           input: exampleForSchema(body.format.schema, "result")
@@ -168,6 +204,16 @@ async function waitForPermission(permissionID) {
   });
 }
 
+async function waitForQuestion(requestID) {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(false), 2000);
+    pendingQuestions.set(requestID, () => {
+      clearTimeout(timeout);
+      resolve(true);
+    });
+  });
+}
+
 async function handleMessage(req, res, sessionID) {
   const body = await readJson(req);
   const state = loadState();
@@ -183,34 +229,94 @@ async function handleMessage(req, res, sessionID) {
   state.lastMessage = { sessionID, messageID, body, prompt };
   saveState(state);
 
-  emit({ type: "session.next.step.started", sessionID });
-  if (session.agent === "build" || body.agent === "build") {
+  const agent = session.agent || body.agent || "build";
+  const info = assistantInfo(sessionID, messageID, agent);
+  emit("message.updated", { sessionID, info });
+  emit("session.next.step.started", {
+    timestamp: Date.now(),
+    sessionID,
+    assistantMessageID: messageID,
+    agent,
+    model: { providerID: "fake", modelID: "fake-model" }
+  });
+
+  if (agent === "build") {
     // Workspace edits are covered by the stock build agent's wildcard allow
     // and never produce a permission round-trip.
-    emit({ type: "file.edited", sessionID, path: "generated.txt" });
-    // A guard category (e.g. external_directory) reaches "ask". The companion
-    // must deny it; only an (incorrect) approval lets the gated edit proceed.
+    emit("file.edited", { file: "generated.txt" });
+    // A guard category (external_directory) reaches "ask". The companion must
+    // deny it; only an (incorrect) approval lets the gated edit proceed.
     const permissionID = "perm_" + messageID;
-    emit({
-      type: "permission.asked",
+    emit("permission.asked", {
+      id: permissionID,
       sessionID,
-      permissionID,
-      permission: { id: permissionID, tool: "edit" },
-      patterns: ["/outside/workspace/secret.txt"]
+      permission: "external_directory",
+      patterns: ["/outside/workspace/secret.txt"],
+      metadata: {},
+      always: ["/outside/workspace/secret.txt"],
+      tool: { messageID, callID: "call_edit_1" }
     });
     const reply = await waitForPermission(permissionID);
     if (reply && reply.response !== "reject") {
-      emit({ type: "file.edited", sessionID, path: "/outside/workspace/secret.txt" });
+      emit("file.edited", { file: "/outside/workspace/secret.txt" });
     }
+  }
+
+  if (process.env.FAKE_OPENCODE_ASK_QUESTION === "1") {
+    // The question tool blocks the session on a deferred reply; a headless
+    // client must reject it via POST /question/{requestID}/reject.
+    const questionID = "que_" + messageID;
+    emit("question.asked", {
+      id: questionID,
+      sessionID,
+      questions: [
+        {
+          question: "Which approach should I take?",
+          header: "Approach",
+          options: [{ label: "Option A" }, { label: "Option B" }]
+        }
+      ]
+    });
+    await waitForQuestion(questionID);
+  }
+
+  if (process.env.FAKE_OPENCODE_SUBAGENT === "1") {
+    // A child session announces itself via session.created with parentID in
+    // properties.info; its output must not pollute the parent final message.
+    const childID = sessionID + "_child";
+    const childMessageID = "msg_child_" + messageID;
+    emit("session.created", {
+      sessionID: childID,
+      info: sessionInfo({ id: childID, directory: process.cwd(), title: "Subtask: explore", agent: "explore" }, sessionID)
+    });
+    emit("message.updated", { sessionID: childID, info: assistantInfo(childID, childMessageID, "explore") });
+    emit("message.part.updated", {
+      sessionID: childID,
+      part: {
+        id: "prt_" + childMessageID,
+        sessionID: childID,
+        messageID: childMessageID,
+        type: "text",
+        text: "Child exploration output.",
+        time: { start: Date.now(), end: Date.now() }
+      },
+      time: Date.now()
+    });
   }
 
   const finalText = prompt.includes("follow up")
     ? "Resumed the prior OpenCode run.\\nFollow-up prompt accepted."
     : "Handled the requested task.\\nTask prompt accepted.";
-  const parts = structuredOutputParts(body) || [{ type: "text", text: finalText }];
+  const parts = (structuredOutputParts(body) || [{ type: "text", text: finalText }]).map((part, index) => ({
+    id: "prt_" + messageID + "_" + index,
+    sessionID,
+    messageID,
+    ...(part.type === "text" ? { time: { start: Date.now(), end: Date.now() } } : {}),
+    ...part
+  }));
   const failMode = process.env.FAKE_OPENCODE_MESSAGE_FAIL;
   if (failMode === "empty-recovery" || failMode === "snapshot-fails-empty-recovery") {
-    emit({ type: "session.idle", sessionID });
+    emit("session.idle", { sessionID });
     res.destroy();
     return;
   }
@@ -221,12 +327,33 @@ async function handleMessage(req, res, sessionID) {
   const finalState = loadState();
   finalState.lastResponseParts = parts;
   finalState.responses = finalState.responses || [];
-  finalState.responses.push({ sessionID, info: { id: messageID, role: "assistant", sessionID }, parts });
+  finalState.responses.push({ sessionID, info, parts });
   saveState(finalState);
+
+  if (process.env.FAKE_OPENCODE_STREAM_DELTAS === "1" && parts[0].type === "text") {
+    // Stream the text purely as an initial empty snapshot plus deltas, then
+    // drop the POST and withhold recovery data: the client must assemble the
+    // final message from the delta stream alone.
+    const full = parts[0].text;
+    emit("message.part.updated", {
+      sessionID,
+      part: Object.assign({}, parts[0], { text: "", time: { start: Date.now() } }),
+      time: Date.now()
+    });
+    emit("message.part.delta", { sessionID, messageID, partID: parts[0].id, field: "text", delta: full.slice(0, 8) });
+    emit("message.part.delta", { sessionID, messageID, partID: parts[0].id, field: "text", delta: full.slice(8) });
+    const cleanState = loadState();
+    cleanState.responses = (cleanState.responses || []).filter((entry) => entry.info.id !== messageID);
+    saveState(cleanState);
+    emit("session.idle", { sessionID });
+    res.destroy();
+    return;
+  }
+
   // Issue #2 regression hooks. "transport": deliver the turn over the event
   // stream but drop the /message HTTP response mid-flight (like undici timing
-  // out the held-open POST). "recover": additionally withhold message.updated so
-  // the client must re-fetch the finished message via GET /session/:id/message.
+  // out the held-open POST). "recover": additionally withhold the part events
+  // so the client must re-fetch the finished message via GET /session/:id/message.
   // "delayed-events" drops the POST before completion events arrive, matching
   // the real failure ordering seen in issue #2 review. "mismatched-recover"
   // gives recovery a stale event-derived message id, then expects fallback to
@@ -234,26 +361,30 @@ async function handleMessage(req, res, sessionID) {
   if (failMode === "delayed-events") {
     res.destroy();
     setTimeout(() => {
-      emit({ type: "message.updated", sessionID, message: { id: messageID, parts } });
-      emit({ type: "session.idle", sessionID });
+      for (const part of parts) {
+        emit("message.part.updated", { sessionID, part, time: Date.now() });
+      }
+      emit("session.idle", { sessionID });
     }, 25);
     return;
   }
   if (failMode === "mismatched-recover") {
-    emit({ type: "message.updated", sessionID, message: { id: messageID + "_event_only" } });
-    emit({ type: "session.idle", sessionID });
+    emit("message.updated", { sessionID, info: assistantInfo(sessionID, messageID + "_event_only", agent) });
+    emit("session.idle", { sessionID });
     res.destroy();
     return;
   }
   if (failMode !== "recover") {
-    emit({ type: "message.updated", sessionID, message: { id: messageID, parts } });
+    for (const part of parts) {
+      emit("message.part.updated", { sessionID, part, time: Date.now() });
+    }
   }
-  emit({ type: "session.idle", sessionID });
+  emit("session.idle", { sessionID });
   if (failMode === "transport" || failMode === "recover") {
     res.destroy();
     return;
   }
-  sendJson(res, { info: { id: messageID, sessionID }, parts });
+  sendJson(res, { info, parts });
 }
 
 function handleSessionListCli() {
@@ -422,7 +553,7 @@ const server = http.createServer(async (req, res) => {
     state.sessions.unshift(session);
     state.lastCreateSession = body;
     saveState(state);
-    emit({ type: "session.created", sessionID: session.id, session });
+    emit("session.created", { sessionID: session.id, info: sessionInfo(session, body.parentID) });
     sendJson(res, session);
     return;
   }
@@ -454,6 +585,20 @@ const server = http.createServer(async (req, res) => {
     state.lastAbort = decodeURIComponent(abortMatch[1]);
     saveState(state);
     sendJson(res, { ok: true });
+    return;
+  }
+
+  const questionRejectMatch = url.pathname.match(/^\\/question\\/([^/]+)\\/reject$/);
+  if (req.method === "POST" && questionRejectMatch) {
+    const requestID = decodeURIComponent(questionRejectMatch[1]);
+    const state = loadState();
+    state.questionRejections = state.questionRejections || [];
+    state.questionRejections.push({ requestID });
+    saveState(state);
+    const resolve = pendingQuestions.get(requestID);
+    pendingQuestions.delete(requestID);
+    resolve?.();
+    sendJson(res, true);
     return;
   }
 

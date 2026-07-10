@@ -1036,6 +1036,80 @@ test("task recovery falls back to the newest assistant message when event messag
   }
 });
 
+test("task rejects headless question asks instead of stalling (issue #28)", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_ASK_QUESTION: "1" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--json", "task that provokes a question"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 0);
+    assert.match(payload.rawOutput, /Handled the requested task/);
+
+    const fakeState = readFakeState(binDir);
+    assert.equal(fakeState.questionRejections.length, 1);
+    assert.match(fakeState.questionRejections[0].requestID, /^que_/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("task assembles the final message from part deltas without transport or recovery (issue #28)", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  // The POST response is dropped and the message list withheld, so the final
+  // text can only come from the message.part.updated + message.part.delta
+  // stream — the exact channel the pre-#28 client ignored.
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_STREAM_DELTAS: "1" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--json", "stream this answer"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 0);
+    assert.match(payload.rawOutput, /^Handled the requested task/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("subagent session output does not pollute the main final message (issue #28)", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_SUBAGENT: "1" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--json", "task with a subagent"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 0);
+    assert.match(payload.rawOutput, /Handled the requested task/);
+    assert.doesNotMatch(payload.rawOutput, /Child exploration output/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
 test("task fails when completion has no recoverable current-turn message (issue #2)", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
