@@ -1,5 +1,6 @@
 import http from "node:http";
 import net from "node:net";
+import { spawn } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -136,6 +137,118 @@ test("teardownServerSession skips local teardown while a server lease is active"
     assert.equal(killedPid, null);
     assert.equal(loadServerSession(workspace).url, session.url);
   } finally {
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("teardownServerSession can ignore only this process lease", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+
+  try {
+    const session = {
+      url: "http://127.0.0.1:1",
+      pid: 123456,
+      pidFile: null,
+      logFile: null,
+      sessionDir: null,
+      external: false,
+      leases: [
+        {
+          pid: process.pid,
+          token: "cancel-process-lease",
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 60000).toISOString()
+        }
+      ]
+    };
+    saveServerSession(workspace, session);
+
+    let killedPid = null;
+    const result = await teardownServerSession({
+      cwd: workspace,
+      url: session.url,
+      pid: session.pid,
+      ignoreCurrentProcessLease: true,
+      killProcess: (pid) => {
+        killedPid = pid;
+      }
+    });
+
+    assert.equal(result.skipped, false);
+    assert.equal(killedPid, session.pid);
+    assert.equal(loadServerSession(workspace), null);
+  } finally {
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("teardownServerSession still skips ignored self lease when another process has a lease", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const otherLeaseHolder = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+    stdio: "ignore",
+    windowsHide: true
+  });
+
+  try {
+    const session = {
+      url: "http://127.0.0.1:1",
+      pid: 123456,
+      pidFile: null,
+      logFile: null,
+      sessionDir: null,
+      external: false,
+      leases: [
+        {
+          pid: process.pid,
+          token: "cancel-process-lease",
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 60000).toISOString()
+        },
+        {
+          pid: otherLeaseHolder.pid,
+          token: "other-live-lease",
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 60000).toISOString()
+        }
+      ]
+    };
+    saveServerSession(workspace, session);
+
+    let killedPid = null;
+    const result = await teardownServerSession({
+      cwd: workspace,
+      url: session.url,
+      pid: session.pid,
+      ignoreCurrentProcessLease: true,
+      killProcess: (pid) => {
+        killedPid = pid;
+      }
+    });
+    const stored = loadServerSession(workspace);
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, "active-leases");
+    assert.equal(killedPid, null);
+    assert.deepEqual(
+      stored.leases.map((lease) => lease.token),
+      ["other-live-lease"]
+    );
+  } finally {
+    otherLeaseHolder.kill();
     if (previousPluginDataDir == null) {
       delete process.env.CLAUDE_PLUGIN_DATA;
     } else {

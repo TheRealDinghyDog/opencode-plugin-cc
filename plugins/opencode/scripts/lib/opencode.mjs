@@ -777,6 +777,11 @@ async function abortSessionAtUrl(serverUrl, threadId, timeoutMs = 1000) {
   }
 }
 
+function normalizeServerUrlForCompare(url) {
+  const normalized = String(url ?? "").trim().replace(/\/+$/, "");
+  return normalized || null;
+}
+
 function getSessionsArray(response) {
   if (Array.isArray(response)) {
     return response;
@@ -902,31 +907,39 @@ export async function getAuthStatus(cwd) {
 
 export async function interruptServerTurn(cwd, { threadId, serverUrl = null }) {
   if (!threadId) {
+    const serverExternal =
+      serverUrl && normalizeServerUrlForCompare(serverUrl) === normalizeServerUrlForCompare(process.env[SERVER_URL_ENV]);
     return {
       attempted: false,
       interrupted: false,
       transport: null,
-      detail: "missing OpenCode session id"
+      detail: "missing OpenCode session id",
+      ...(serverUrl ? { serverUrl } : {}),
+      ...(serverExternal ? { serverExternal: true } : {})
     };
   }
 
   if (serverUrl) {
     try {
       await abortSessionAtUrl(serverUrl, threadId);
+      const serverExternal = normalizeServerUrlForCompare(serverUrl) === normalizeServerUrlForCompare(process.env[SERVER_URL_ENV]);
       return {
         attempted: true,
         interrupted: true,
         transport: "server",
         detail: `Aborted OpenCode session ${threadId}.`,
-        serverUrl
+        serverUrl,
+        ...(serverExternal ? { serverExternal: true } : {})
       };
     } catch (error) {
+      const serverExternal = normalizeServerUrlForCompare(serverUrl) === normalizeServerUrlForCompare(process.env[SERVER_URL_ENV]);
       return {
         attempted: true,
         interrupted: false,
         transport: "server",
         detail: error instanceof Error ? error.message : String(error),
-        serverUrl
+        serverUrl,
+        ...(serverExternal ? { serverExternal: true } : {})
       };
     }
   }
@@ -941,23 +954,33 @@ export async function interruptServerTurn(cwd, { threadId, serverUrl = null }) {
     };
   }
 
+  let usedServerUrl = null;
+  let usedServerExternal = false;
   try {
-    return await withServer(cwd, async (client, server) => {
-      await client.abort(threadId);
-      return {
-        attempted: true,
-        interrupted: true,
-        transport: "server",
-        detail: `Aborted OpenCode session ${threadId}.`,
-        serverUrl: server.url
-      };
-    });
+    const server = await ensureServer(cwd);
+    usedServerUrl = server?.url ?? null;
+    usedServerExternal = Boolean(server?.external);
+    if (!usedServerUrl) {
+      throw new Error("OpenCode server did not become ready.");
+    }
+    const client = new OpencodeServerClient(usedServerUrl);
+    await client.abort(threadId);
+    return {
+      attempted: true,
+      interrupted: true,
+      transport: "server",
+      detail: `Aborted OpenCode session ${threadId}.`,
+      serverUrl: usedServerUrl,
+      serverExternal: usedServerExternal
+    };
   } catch (error) {
     return {
       attempted: true,
       interrupted: false,
       transport: "server",
-      detail: error instanceof Error ? error.message : String(error)
+      detail: error instanceof Error ? error.message : String(error),
+      ...(usedServerUrl ? { serverUrl: usedServerUrl } : {}),
+      ...(usedServerUrl ? { serverExternal: usedServerExternal } : {})
     };
   }
 }

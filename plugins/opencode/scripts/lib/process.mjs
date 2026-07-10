@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import path from "node:path";
 import process from "node:process";
 
 export function runCommand(command, args = [], options = {}) {
@@ -115,6 +116,124 @@ export function terminateProcessTree(pid, options = {}) {
 
     return { attempted: true, delivered: false, method: "process-group" };
   }
+}
+
+function commandLineTokens(commandLine) {
+  const tokens = [];
+  let current = "";
+  let quote = null;
+
+  for (const char of String(commandLine ?? "")) {
+    if ((char === '"' || char === "'") && (!quote || quote === char)) {
+      quote = quote === char ? null : char;
+      continue;
+    }
+    if (!quote && /\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (current) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+
+function tokenLooksLikeCompanionScript(token) {
+  return path.basename(token) === "opencode-companion.mjs";
+}
+
+function tokensContainJobId(tokens, jobId) {
+  const expected = String(jobId ?? "");
+  if (!expected) {
+    return false;
+  }
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index] === "--job-id" && tokens[index + 1] === expected) {
+      return true;
+    }
+    if (tokens[index] === `--job-id=${expected}`) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function commandLineLooksLikeTaskWorker(commandLine, { jobId } = {}) {
+  const tokens = commandLineTokens(commandLine);
+  return (
+    tokens.some(tokenLooksLikeCompanionScript) &&
+    tokens.includes("task-worker") &&
+    tokensContainJobId(tokens, jobId)
+  );
+}
+
+export function readProcessCommandLine(pid, options = {}) {
+  if (!Number.isFinite(pid)) {
+    return null;
+  }
+
+  const platform = options.platform ?? process.platform;
+  const runCommandImpl = options.runCommandImpl ?? runCommand;
+  const result =
+    platform === "win32"
+      ? runCommandImpl(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-Command",
+            `(Get-CimInstance Win32_Process -Filter "ProcessId = ${Number(pid)}").CommandLine`
+          ],
+          {
+            cwd: options.cwd,
+            env: options.env
+          }
+        )
+      : runCommandImpl("ps", ["-ww", "-p", String(pid), "-o", "args="], {
+          cwd: options.cwd,
+          env: options.env
+        });
+
+  if (result.error || result.status !== 0) {
+    return null;
+  }
+
+  return String(result.stdout ?? "").trim() || null;
+}
+
+export function terminateTaskWorkerProcessTree(pid, options = {}) {
+  if (!Number.isFinite(pid)) {
+    return { attempted: false, delivered: false, method: null };
+  }
+
+  const commandLine = readProcessCommandLine(pid, options);
+  if (!commandLine) {
+    return {
+      attempted: false,
+      delivered: false,
+      method: null,
+      reason: "identity-unverified",
+      commandLine: null
+    };
+  }
+
+  if (!commandLineLooksLikeTaskWorker(commandLine, { jobId: options.jobId })) {
+    return {
+      attempted: false,
+      delivered: false,
+      method: null,
+      reason: "identity-mismatch",
+      commandLine
+    };
+  }
+
+  return terminateProcessTree(pid, options);
 }
 
 export function formatCommandFailure(result) {
