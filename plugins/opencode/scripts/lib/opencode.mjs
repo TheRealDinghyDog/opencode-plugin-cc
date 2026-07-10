@@ -25,7 +25,13 @@ const READ_ONLY_AGENT = "plan";
 // (issue #2 / review finding #17). Deep reviews legitimately run many minutes,
 // so keep it generous; on expiry we still try to recover the final message.
 const DEFAULT_TURN_TIMEOUT_MS = 30 * 60 * 1000;
+// After the event stream drops, wait this long for the held-open /message
+// response and any trailing events to land before the first HTTP recovery
+// poll. This is a grace before polling STARTS — not a deadline (issue #30).
 const DEFAULT_STREAM_DROP_GRACE_MS = 5000;
+// Interval between HTTP recovery polls while the stream is down and the turn
+// has not otherwise completed. Polling continues until the outer turn timeout.
+const DEFAULT_STREAM_DROP_POLL_INTERVAL_MS = 2000;
 const DEFAULT_RECOVERY_TIMEOUT_MS = 5000;
 
 function sleep(ms) {
@@ -926,6 +932,8 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
   const turnTimeoutMs = Math.max(0, Number(options.turnTimeoutMs) || DEFAULT_TURN_TIMEOUT_MS);
   let timedOut = false;
   let turnTimer = null;
+  // Hoisted so the finally block can drain it even if the try throws early.
+  let streamDropRecovery = Promise.resolve();
 
   try {
     await Promise.race([
@@ -991,17 +999,38 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
       0,
       Number(options.streamDropGraceMs ?? DEFAULT_STREAM_DROP_GRACE_MS) || DEFAULT_STREAM_DROP_GRACE_MS
     );
-    const eventStreamDropPromise = eventStream.then(async () => {
-      if (state.completed || responseSettled) {
-        return state;
-      }
-      if (streamDropGraceMs > 0) {
+    const streamDropPollIntervalMs = Math.max(
+      50,
+      Number(options.streamDropPollIntervalMs ?? DEFAULT_STREAM_DROP_POLL_INTERVAL_MS) ||
+        DEFAULT_STREAM_DROP_POLL_INTERVAL_MS
+    );
+
+    // A dropped event stream is loss of one observation channel, NOT turn
+    // completion. The held-open /message response can still be running and
+    // succeed well after the drop, and the finished message is fetchable over
+    // HTTP. So once the stream closes: wait a short grace for the response and
+    // trailing events to land, then actively poll the server for the finished
+    // message until the turn completes another way (response fallback,
+    // recovery, session.idle over a reconnect) or the OUTER turn timeout fires.
+    // We never fail the turn merely because the stream ended (issue #30).
+    streamDropRecovery = eventStream.then(async () => {
+      if (streamDropGraceMs > 0 && !state.completed && !responseSettled) {
         await Promise.race([state.completion, responseSettledPromise, sleep(streamDropGraceMs)]);
       }
-      return state;
+      while (!state.completed && !timedOut) {
+        // Only fetch when we actually lack a result; skip the redundant GET if
+        // parts already streamed in before the drop (issue #12).
+        if (!state.error && !state.finalMessage && state.structuredOutput == null) {
+          await recoverFinalMessageFromServer(client, state, { recoveryTimeoutMs: options.recoveryTimeoutMs });
+        }
+        if (state.completed || timedOut) {
+          break;
+        }
+        await Promise.race([state.completion, timeoutPromise, sleep(streamDropPollIntervalMs)]);
+      }
     });
 
-    await Promise.race([state.completion, eventStreamDropPromise, timeoutPromise]);
+    await Promise.race([state.completion, streamDropRecovery, timeoutPromise]);
 
     // If we didn't capture a usable result, pull the finished message straight
     // from the server before giving up. Key this off whether we actually lack a
@@ -1034,6 +1063,10 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
     }
     eventAbort.abort();
     await eventStream.catch(() => {});
+    // Drain the stream-drop recovery loop so it cannot poll past return. Its
+    // guard (state.completed || timedOut) is already satisfied once the outer
+    // race resolved, so this settles promptly.
+    await streamDropRecovery.catch(() => {});
     if (state.fallbackTimer) {
       clearTimeout(state.fallbackTimer);
     }
@@ -1557,6 +1590,7 @@ export function readOutputSchema(schemaPath) {
 export {
   DEFAULT_CONTINUE_PROMPT,
   TASK_SESSION_PREFIX,
+  captureTurn as captureTurnForTest,
   getAvailability as getOpencodeAvailability,
   getAuthStatus as getOpencodeAuthStatus
 };
