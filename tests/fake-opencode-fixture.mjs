@@ -159,11 +159,11 @@ function structuredOutputParts(body) {
 }
 
 async function waitForPermission(permissionID) {
-  await new Promise((resolve) => {
-    const timeout = setTimeout(resolve, 2000);
-    pendingPermissions.set(permissionID, () => {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(null), 2000);
+    pendingPermissions.set(permissionID, (reply) => {
       clearTimeout(timeout);
-      resolve();
+      resolve(reply ?? null);
     });
   });
 }
@@ -185,10 +185,23 @@ async function handleMessage(req, res, sessionID) {
 
   emit({ type: "session.next.step.started", sessionID });
   if (session.agent === "build" || body.agent === "build") {
-    const permissionID = "perm_" + messageID;
-    emit({ type: "permission.asked", sessionID, permissionID, permission: { id: permissionID, tool: "edit" } });
-    await waitForPermission(permissionID);
+    // Workspace edits are covered by the stock build agent's wildcard allow
+    // and never produce a permission round-trip.
     emit({ type: "file.edited", sessionID, path: "generated.txt" });
+    // A guard category (e.g. external_directory) reaches "ask". The companion
+    // must deny it; only an (incorrect) approval lets the gated edit proceed.
+    const permissionID = "perm_" + messageID;
+    emit({
+      type: "permission.asked",
+      sessionID,
+      permissionID,
+      permission: { id: permissionID, tool: "edit" },
+      patterns: ["/outside/workspace/secret.txt"]
+    });
+    const reply = await waitForPermission(permissionID);
+    if (reply && reply.response !== "reject") {
+      emit({ type: "file.edited", sessionID, path: "/outside/workspace/secret.txt" });
+    }
   }
 
   const finalText = prompt.includes("follow up")
@@ -448,7 +461,7 @@ const server = http.createServer(async (req, res) => {
     saveState(state);
     const resolve = pendingPermissions.get(permissionID);
     pendingPermissions.delete(permissionID);
-    resolve?.();
+    resolve?.(body);
     sendJson(res, { ok: true });
     return;
   }

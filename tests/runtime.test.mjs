@@ -659,7 +659,7 @@ test("foreground task runs through opencode serve and stores a visible session",
   }
 });
 
-test("write task auto-allows headless permission prompts and records touched files", { skip: LOCAL_LISTEN_SKIP }, () => {
+test("write task denies gated permission asks and keeps stock agent guards (issue #26)", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
@@ -674,17 +674,18 @@ test("write task auto-allows headless permission prompts and records touched fil
 
     assert.equal(result.status, 0, result.stderr);
     const payload = JSON.parse(result.stdout);
+    // Only the ungated workspace edit lands; the gated out-of-workspace edit
+    // stays denied, so it never shows up in touched files.
     assert.deepEqual(payload.touchedFiles, ["generated.txt"]);
 
     const fakeState = readFakeState(binDir);
     assert.equal(fakeState.sessions[0].agent, "build");
+    // No session-level permission override: the stock build agent's ask-guards
+    // (external_directory, .env reads, doom_loop) must stay in effect.
+    assert.deepEqual(fakeState.sessions[0].permission, []);
     assert.equal(fakeState.permissions.length, 1);
-    assert.equal(fakeState.permissions[0].body.response, "always");
+    assert.equal(fakeState.permissions[0].body.response, "reject");
     assert.equal(fakeState.permissions[0].body.action, undefined);
-    assert.deepEqual(
-      fakeState.sessions[0].permission.filter((rule) => rule.action === "allow").map((rule) => rule.permission).sort(),
-      ["*"]
-    );
   } finally {
     cleanupServer(repo, env);
   }

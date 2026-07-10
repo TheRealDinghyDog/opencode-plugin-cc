@@ -133,6 +133,9 @@ Use it when you want OpenCode to:
 > [!NOTE]
 > Depending on the task and the model you choose these tasks might take a long time and it's generally recommended to force the task to be in the background or move the agent to the background.
 
+> [!IMPORTANT]
+> Rescue tasks default to a write-capable run using OpenCode's stock `build` agent under your own OpenCode permission configuration. Permission categories OpenCode gates behind an approval prompt (external-directory access, `.env` reads, doom-loop protection) are automatically **denied** in these headless runs — the plugin never approves a gated request on your behalf. Note that OpenCode permissions are approval-level controls, not an operating-system sandbox; run the OpenCode server in a container or as a restricted user if you need a hard filesystem boundary.
+
 It supports `--background`, `--wait`, `--resume`, and `--fresh`. If you omit `--resume` and `--fresh`, the plugin can offer to continue the latest rescue thread for this repo.
 
 Examples:
