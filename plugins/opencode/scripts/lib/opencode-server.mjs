@@ -341,6 +341,13 @@ export class OpencodeServerClient {
     });
   }
 
+  rejectQuestion(requestID, options = {}) {
+    // The reject route takes no request body.
+    return this.request("POST", `/question/${encodePathSegment(requestID)}/reject`, {
+      signal: options.signal
+    });
+  }
+
   health(options = {}) {
     return this.request("GET", "/global/health", { signal: options.signal });
   }

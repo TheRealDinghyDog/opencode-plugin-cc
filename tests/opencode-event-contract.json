@@ -1,0 +1,364 @@
+{
+  "source": "opencode /doc",
+  "version": "1.17.15",
+  "events": {
+    "session.created": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [
+          "sessionID",
+          "info"
+        ],
+        "keys": [
+          "sessionID",
+          "info"
+        ]
+      }
+    },
+    "session.updated": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [
+          "sessionID",
+          "info"
+        ],
+        "keys": [
+          "sessionID",
+          "info"
+        ]
+      }
+    },
+    "session.idle": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [
+          "sessionID"
+        ],
+        "keys": [
+          "sessionID"
+        ]
+      }
+    },
+    "session.error": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [],
+        "keys": [
+          "sessionID",
+          "error"
+        ]
+      }
+    },
+    "message.updated": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [
+          "sessionID",
+          "info"
+        ],
+        "keys": [
+          "sessionID",
+          "info"
+        ]
+      }
+    },
+    "message.part.updated": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [
+          "sessionID",
+          "part",
+          "time"
+        ],
+        "keys": [
+          "sessionID",
+          "part",
+          "time"
+        ]
+      }
+    },
+    "message.part.delta": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [
+          "sessionID",
+          "messageID",
+          "partID",
+          "field",
+          "delta"
+        ],
+        "keys": [
+          "sessionID",
+          "messageID",
+          "partID",
+          "field",
+          "delta"
+        ]
+      }
+    },
+    "file.edited": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [
+          "file"
+        ],
+        "keys": [
+          "file"
+        ]
+      }
+    },
+    "permission.asked": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [
+          "id",
+          "sessionID",
+          "permission",
+          "patterns",
+          "metadata",
+          "always"
+        ],
+        "keys": [
+          "id",
+          "sessionID",
+          "permission",
+          "patterns",
+          "metadata",
+          "always",
+          "tool"
+        ]
+      }
+    },
+    "question.asked": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [
+          "id",
+          "sessionID",
+          "questions"
+        ],
+        "keys": [
+          "id",
+          "sessionID",
+          "questions",
+          "tool"
+        ]
+      }
+    },
+    "session.next.step.started": {
+      "required": [
+        "id",
+        "type",
+        "properties"
+      ],
+      "properties": {
+        "required": [
+          "timestamp",
+          "sessionID",
+          "assistantMessageID",
+          "agent",
+          "model"
+        ],
+        "keys": [
+          "timestamp",
+          "sessionID",
+          "assistantMessageID",
+          "agent",
+          "model",
+          "snapshot"
+        ]
+      }
+    }
+  },
+  "objects": {
+    "TextPart": {
+      "required": [
+        "id",
+        "sessionID",
+        "messageID",
+        "type",
+        "text"
+      ],
+      "keys": [
+        "id",
+        "sessionID",
+        "messageID",
+        "type",
+        "text",
+        "synthetic",
+        "ignored",
+        "time",
+        "metadata"
+      ]
+    },
+    "ReasoningPart": {
+      "required": [
+        "id",
+        "sessionID",
+        "messageID",
+        "type",
+        "text",
+        "time"
+      ],
+      "keys": [
+        "id",
+        "sessionID",
+        "messageID",
+        "type",
+        "text",
+        "metadata",
+        "time"
+      ]
+    },
+    "ToolPart": {
+      "required": [
+        "id",
+        "sessionID",
+        "messageID",
+        "type",
+        "callID",
+        "tool",
+        "state"
+      ],
+      "keys": [
+        "id",
+        "sessionID",
+        "messageID",
+        "type",
+        "callID",
+        "tool",
+        "state",
+        "metadata"
+      ]
+    },
+    "AssistantMessage": {
+      "required": [
+        "id",
+        "sessionID",
+        "role",
+        "time",
+        "parentID",
+        "modelID",
+        "providerID",
+        "mode",
+        "agent",
+        "path",
+        "cost",
+        "tokens"
+      ],
+      "keys": [
+        "id",
+        "sessionID",
+        "role",
+        "time",
+        "error",
+        "parentID",
+        "modelID",
+        "providerID",
+        "mode",
+        "agent",
+        "path",
+        "summary",
+        "cost",
+        "tokens",
+        "structured",
+        "variant",
+        "finish"
+      ]
+    },
+    "UserMessage": {
+      "required": [
+        "id",
+        "sessionID",
+        "role",
+        "time",
+        "agent",
+        "model"
+      ],
+      "keys": [
+        "id",
+        "sessionID",
+        "role",
+        "time",
+        "format",
+        "summary",
+        "agent",
+        "model",
+        "system",
+        "tools"
+      ]
+    },
+    "Session": {
+      "required": [
+        "id",
+        "slug",
+        "projectID",
+        "directory",
+        "title",
+        "version",
+        "time"
+      ],
+      "keys": [
+        "id",
+        "slug",
+        "projectID",
+        "workspaceID",
+        "directory",
+        "path",
+        "parentID",
+        "summary",
+        "cost",
+        "tokens",
+        "share",
+        "title",
+        "agent",
+        "model",
+        "version",
+        "metadata",
+        "time",
+        "permission",
+        "revert"
+      ]
+    }
+  }
+}
