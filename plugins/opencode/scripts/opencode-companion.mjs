@@ -424,7 +424,7 @@ async function executeTaskRun(request) {
     write: request.write,
     sandbox: request.write ? "workspace-write" : "read-only",
     onProgress: request.onProgress,
-    persistThread: true,
+    taskSessionTitle: true,
     threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
   });
 

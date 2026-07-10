@@ -68,8 +68,8 @@ test("Claude JSONL converts to a well-formed OpenCode import document", () => {
   assert.equal(doc.info.slug, "investigate-the-failure");
   assert.equal(doc.info.agent, "build");
   assert.deepEqual(doc.info.model, {
-    id: "gpt-5.4-mini",
-    providerID: "openai",
+    id: "imported-transcript",
+    providerID: "claude-code",
     variant: "default"
   });
   assert.equal(doc.info.version, "1.17.10-test");

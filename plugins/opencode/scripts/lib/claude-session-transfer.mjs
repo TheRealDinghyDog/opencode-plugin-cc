@@ -6,8 +6,8 @@ import path from "node:path";
 import { ensureAbsolutePath } from "./fs.mjs";
 
 export const TRANSCRIPT_PATH_ENV = "OPENCODE_COMPANION_TRANSCRIPT_PATH";
-export const OPENCODE_IMPORT_MODEL_ID = "gpt-5.4-mini";
-export const OPENCODE_IMPORT_PROVIDER_ID = "openai";
+export const OPENCODE_IMPORT_MODEL_ID = "imported-transcript";
+export const OPENCODE_IMPORT_PROVIDER_ID = "claude-code";
 export const OPENCODE_IMPORT_AGENT = "build";
 const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
 

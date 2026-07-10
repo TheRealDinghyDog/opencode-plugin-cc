@@ -1386,7 +1386,7 @@ export async function runServerTurn(cwd, options = {}) {
       });
       const session = await client.createSession(
         buildCreateSessionParams(cwd, {
-          title: options.threadName ?? options.title ?? (options.persistThread ? buildTaskSessionName(prompt) : null),
+          title: options.threadName ?? options.title ?? (options.taskSessionTitle ? buildTaskSessionName(prompt) : null),
           model: options.model,
           write,
           agent
@@ -1471,7 +1471,9 @@ export async function runServerReview(cwd, options = {}) {
     ...options,
     agent: READ_ONLY_AGENT,
     sandbox: "read-only",
-    persistThread: false,
+    // Review sessions intentionally remain in OpenCode's session store so
+    // users can reopen them with `opencode --session <id>`.
+    taskSessionTitle: false,
     threadName: options.threadName ?? "OpenCode Review"
   });
   return {
