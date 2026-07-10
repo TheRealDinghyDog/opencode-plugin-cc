@@ -1122,11 +1122,14 @@ async function handleCancel(argv) {
         ? serverExternal === false
         : interrupt.serverExternal !== true;
       if (ownedServerTeardown) {
-        await teardownServerSession({
+        const teardownResult = await teardownServerSession({
           cwd: workspaceRoot,
           ignoreCurrentProcessLease: Boolean(interrupt.serverUrl && !serverUrl),
           ...(teardownServerUrl ? { url: teardownServerUrl } : {})
         });
+        if (teardownResult?.killSkipped) {
+          appendLogLine(cancelLogFile, `Skipped OpenCode server kill: ${teardownResult.reason}.`);
+        }
       }
     } catch (error) {
       appendLogLine(
