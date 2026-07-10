@@ -1,13 +1,75 @@
 import http from "node:http";
+import net from "node:net";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { OpencodeServerClient } from "../plugins/opencode/scripts/lib/opencode-server.mjs";
+import { buildBasicAuthHeader, OpencodeServerClient } from "../plugins/opencode/scripts/lib/opencode-server.mjs";
+
+async function canListenLocalhost() {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    let settled = false;
+    function finish(value) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    }
+    server.once("error", () => finish(false));
+    server.listen(0, "127.0.0.1", () => {
+      server.close(() => finish(true));
+    });
+  });
+}
+
+const LOCAL_LISTEN_AVAILABLE = await canListenLocalhost();
+const LOCAL_LISTEN_SKIP = LOCAL_LISTEN_AVAILABLE ? false : "local 127.0.0.1 listen is unavailable in this sandbox";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+test("buildBasicAuthHeader follows OpenCode's basic-auth convention", () => {
+  assert.equal(buildBasicAuthHeader({ password: "pw" }), `Basic ${Buffer.from("opencode:pw").toString("base64")}`);
+  assert.equal(
+    buildBasicAuthHeader({ username: "custom", password: "pw" }),
+    `Basic ${Buffer.from("custom:pw").toString("base64")}`
+  );
+  assert.equal(buildBasicAuthHeader({}), null);
+  assert.equal(buildBasicAuthHeader({ password: "" }), null);
+});
+
+test("client sends Basic auth on requests, fresh connections, and the event stream", { skip: LOCAL_LISTEN_SKIP }, async () => {
+  const authorization = `Basic ${Buffer.from("opencode:secret").toString("base64")}`;
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    seen.push({ url: req.url, authorization: req.headers.authorization });
+    if (req.url === "/event") {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end("data: {\"type\":\"noop\"}\n\n");
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const client = new OpencodeServerClient(`http://127.0.0.1:${server.address().port}`, { password: "secret" });
+
+  try {
+    await client.health();
+    await client.listMessages("ses_auth", { freshConnection: true, requestTimeoutMs: 2000 });
+    await client.subscribeEvents(() => {});
+
+    assert.equal(seen.length, 3);
+    for (const request of seen) {
+      assert.equal(request.authorization, authorization, `missing auth on ${request.url}`);
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
 
 function createRequestStub(onRequest) {
   const req = new EventEmitter();

@@ -19,6 +19,8 @@ they already have.
   - Usage is billed by whichever OpenCode provider/model you select.
 - **Node.js 18.18 or later**
 
+The plugin starts its own local `opencode serve` on demand, bound to `127.0.0.1` and protected with a per-server random password (HTTP Basic auth), so other local processes cannot reach its API. If you point the plugin at your own server via `OPENCODE_COMPANION_SERVER_URL` and that server is password-protected, also export `OPENCODE_SERVER_PASSWORD` (and `OPENCODE_SERVER_USERNAME` if you customized it).
+
 ## Install
 
 Add the marketplace in Claude Code:

@@ -340,8 +340,20 @@ try {
 } catch {}
 const bootStartedAt = Date.now();
 const healthDelayMs = Math.max(0, Number(process.env.FAKE_OPENCODE_HEALTH_DELAY_MS || 0));
+// Mirror the real server's auth: when OPENCODE_SERVER_PASSWORD is set, every
+// route (including /global/health and /event) requires HTTP Basic auth.
+const serverPassword = process.env.OPENCODE_SERVER_PASSWORD || "";
+const serverUsername = process.env.OPENCODE_SERVER_USERNAME || "opencode";
+const expectedAuthorization = serverPassword
+  ? "Basic " + Buffer.from(serverUsername + ":" + serverPassword).toString("base64")
+  : null;
 
 const server = http.createServer(async (req, res) => {
+  if (expectedAuthorization && req.headers.authorization !== expectedAuthorization) {
+    res.writeHead(401, { "www-authenticate": 'Basic realm="opencode"' });
+    res.end();
+    return;
+  }
   const url = new URL(req.url, "http://127.0.0.1");
 
   if (req.method === "GET" && url.pathname === "/global/health") {
