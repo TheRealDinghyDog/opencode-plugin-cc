@@ -508,7 +508,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/provider") {
-    sendJson(res, { id: "openai", name: "OpenAI" });
+    if (process.env.FAKE_OPENCODE_PROVIDER_FAIL === "1") {
+      sendJson(res, { error: "provider endpoint failed" }, 500);
+      return;
+    }
+    if (process.env.FAKE_OPENCODE_NO_PROVIDER === "1") {
+      sendJson(res, { all: [], default: {}, connected: [] });
+    } else {
+      sendJson(res, { all: [{ id: "openai" }], default: {}, connected: ["openai"] });
+    }
     return;
   }
 

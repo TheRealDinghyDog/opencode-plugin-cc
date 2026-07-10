@@ -238,10 +238,10 @@ async function handleSetup(argv) {
   outputResult(options.json ? finalReport : renderSetupReport(finalReport), options.json);
 }
 
-function buildAdversarialReviewPrompt(context, focusText) {
-  const template = loadPromptTemplate(ROOT_DIR, "adversarial-review");
+function buildReviewPrompt(context, focusText, { templateName, reviewKind }) {
+  const template = loadPromptTemplate(ROOT_DIR, templateName);
   return interpolateTemplate(template, {
-    REVIEW_KIND: "Adversarial Review",
+    REVIEW_KIND: reviewKind,
     TARGET_LABEL: context.target.label,
     USER_FOCUS: focusText || "No extra focus provided.",
     REVIEW_COLLECTION_GUIDANCE: context.collectionGuidance,
@@ -339,7 +339,10 @@ async function executeReviewRun(request) {
   const reviewName = request.reviewName ?? "Review";
 
   const context = collectReviewContext(request.cwd, target);
-  const prompt = buildAdversarialReviewPrompt(context, focusText);
+  const prompt = buildReviewPrompt(context, focusText, {
+    templateName: request.promptTemplate ?? "adversarial-review",
+    reviewKind: reviewName
+  });
   const result = await runServerReview(context.repoRoot, {
     prompt,
     model: request.model,
@@ -746,6 +749,7 @@ async function handleReviewCommand(argv, config) {
         model: options.model,
         focusText,
         reviewName: config.reviewName,
+        promptTemplate: config.promptTemplate,
         onProgress: progress
       }),
     { json: options.json }
@@ -754,7 +758,15 @@ async function handleReviewCommand(argv, config) {
 
 async function handleReview(argv) {
   return handleReviewCommand(argv, {
-    reviewName: "Review"
+    reviewName: "Review",
+    promptTemplate: "review",
+    validateRequest: (target, focusText) => {
+      if (focusText) {
+        throw new Error(
+          "/opencode:review does not accept positional focus text. Use /opencode:adversarial-review for a steerable challenge review with custom focus."
+        );
+      }
+    }
   });
 }
 
@@ -1167,7 +1179,8 @@ async function main() {
       break;
     case "adversarial-review":
       await handleReviewCommand(argv, {
-        reviewName: "Adversarial Review"
+        reviewName: "Adversarial Review",
+        promptTemplate: "adversarial-review"
       });
       break;
     case "task":

@@ -1385,3 +1385,126 @@ test("runServerTurn deletes only sessions created by a failed captureTurn", asyn
     resumedFetch.restore();
   }
 });
+
+test("adversarial-review prompt uses the adversarial-review.md template", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "before\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "README.md"), "after\n");
+  const env = buildTestEnv(binDir);
+
+  try {
+    const result = run("node", [SCRIPT, "adversarial-review", "--json"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const fakeState = readFakeState(binDir);
+    const prompt = fakeState.lastMessage.prompt;
+    assert.match(prompt, /adversarial software review/);
+    assert.match(prompt, /break confidence/);
+    assert.match(prompt, /Default to skepticism/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("review prompt uses the neutral review.md template", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "before\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "README.md"), "after\n");
+  const env = buildTestEnv(binDir);
+
+  try {
+    const result = run("node", [SCRIPT, "review", "--json"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const fakeState = readFakeState(binDir);
+    const prompt = fakeState.lastMessage.prompt;
+    assert.doesNotMatch(prompt, /break confidence/);
+    assert.doesNotMatch(prompt, /Default to skepticism/);
+    assert.match(prompt, /balanced, high-signal software review/);
+    assert.match(prompt, /find real bugs, correctness issues/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("review rejects positional focus text with a clear error", () => {
+  const repo = makeTempDir();
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "test\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+
+  const result = run("node", [SCRIPT, "review", "check auth paths"], {
+    cwd: repo,
+    env: process.env
+  });
+
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /does not accept positional focus text/);
+  assert.match(result.stderr, /adversarial-review/);
+});
+
+test("setup reports not ready when no provider is connected", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  const env = buildTestEnv(binDir, {
+    FAKE_OPENCODE_NO_PROVIDER: "1"
+  });
+
+  try {
+    const result = run("node", [SCRIPT, "setup", "--json"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.ready, false);
+    assert.equal(payload.opencode.available, true);
+    assert.equal(payload.auth.loggedIn, false);
+    assert.match(payload.auth.detail, /No OpenCode provider is connected/);
+    assert.ok(payload.nextSteps.some((step) => /provider/i.test(step)), "nextSteps should include a provider config step");
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("setup reports loggedIn false when /provider endpoint fails", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  const env = buildTestEnv(binDir, {
+    FAKE_OPENCODE_PROVIDER_FAIL: "1"
+  });
+
+  try {
+    const result = run("node", [SCRIPT, "setup", "--json"], {
+      cwd: repo,
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.auth.loggedIn, false);
+    assert.equal(payload.ready, false);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
