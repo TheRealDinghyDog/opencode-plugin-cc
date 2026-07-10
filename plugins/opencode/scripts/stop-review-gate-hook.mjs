@@ -56,14 +56,14 @@ function buildStopReviewPrompt(input = {}) {
   });
 }
 
-function buildSetupNote(cwd) {
+function buildUnavailableReviewerReason(cwd) {
   const availability = getAvailability(cwd);
   if (availability.available) {
     return null;
   }
 
-  const detail = availability.detail ? ` ${availability.detail}.` : "";
-  return `OpenCode is not set up for the review gate.${detail} Run /opencode:setup.`;
+  const detail = availability.detail ? ` Details: ${availability.detail}.` : "";
+  return `OpenCode reviewer is unavailable, so the enabled stop-time review gate is blocking this stop.${detail} Restore OpenCode (ensure \`opencode --version\` works) and rerun \`/opencode:setup\`, or disable the gate with \`/opencode:setup --disable-review-gate\`.`;
 }
 
 function parseStopReviewOutput(rawOutput) {
@@ -166,10 +166,14 @@ async function main() {
     return;
   }
 
-  const setupNote = buildSetupNote(cwd);
-  if (setupNote) {
-    logNote(setupNote);
+  const unavailableReviewerReason = buildUnavailableReviewerReason(cwd);
+  if (unavailableReviewerReason) {
+    logNote(unavailableReviewerReason);
     logNote(runningTaskNote);
+    emitDecision({
+      decision: "block",
+      reason: runningTaskNote ? `${runningTaskNote} ${unavailableReviewerReason}` : unavailableReviewerReason
+    });
     return;
   }
 

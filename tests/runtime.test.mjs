@@ -307,6 +307,43 @@ test("session end bounds a contended server teardown lock and reports a diagnost
   });
 });
 
+test("stop review gate blocks when the enabled OpenCode reviewer is unavailable", async () => {
+  const workspace = makeTempDir();
+  const binDir = makeTempDir();
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+  const env = {
+    ...process.env,
+    PATH: binDir,
+    CLAUDE_PLUGIN_DATA: pluginDataDir,
+    OPENCODE_COMPANION_SESSION_ID: "sess-current"
+  };
+
+  await withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, () => {
+    saveState(workspace, {
+      version: 1,
+      config: { stopReviewGate: true },
+      jobs: []
+    });
+
+    const result = run(process.execPath, [STOP_HOOK], {
+      cwd: workspace,
+      env,
+      input: JSON.stringify({
+        cwd: workspace,
+        session_id: env.OPENCODE_COMPANION_SESSION_ID
+      })
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, "block");
+    assert.match(decision.reason, /OpenCode reviewer is unavailable/);
+    assert.match(decision.reason, /\/opencode:setup/);
+    assert.match(decision.reason, /--disable-review-gate/);
+    assert.match(result.stderr, /blocking this stop/);
+  });
+});
+
 test("stop review gate tears down a server left by a failed stop review task", { skip: LOCAL_LISTEN_SKIP }, async () => {
   const workspace = makeTempDir();
   const binDir = makeTempDir();
@@ -334,6 +371,7 @@ test("stop review gate tears down a server left by a failed stop review task", {
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).decision, "block");
+    assert.match(readFakeState(binDir).lastMessage.prompt, /Run a stop-gate review of the previous Claude turn/);
     assert.equal(loadServerSession(workspace), null);
   });
 });

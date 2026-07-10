@@ -192,7 +192,9 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     nextSteps.push("Configure an OpenCode provider, then rerun `/opencode:setup`.");
   }
   if (!config.stopReviewGate) {
-    nextSteps.push("Optional: run `/opencode:setup --enable-review-gate` to require a fresh review before stop.");
+    nextSteps.push(
+      "Optional: run `/opencode:setup --enable-review-gate` to require a fresh review before stop. If OpenCode becomes unavailable, the enabled gate blocks stopping; disable it with `/opencode:setup --disable-review-gate`."
+    );
   }
 
   return {
@@ -224,7 +226,9 @@ async function handleSetup(argv) {
 
   if (options["enable-review-gate"]) {
     setConfig(workspaceRoot, "stopReviewGate", true);
-    actionsTaken.push(`Enabled the stop-time review gate for ${workspaceRoot}.`);
+    actionsTaken.push(
+      `Enabled the stop-time review gate for ${workspaceRoot}. If the OpenCode reviewer is unavailable, stopping is blocked; disable the gate with /opencode:setup --disable-review-gate.`
+    );
   } else if (options["disable-review-gate"]) {
     setConfig(workspaceRoot, "stopReviewGate", false);
     actionsTaken.push(`Disabled the stop-time review gate for ${workspaceRoot}.`);

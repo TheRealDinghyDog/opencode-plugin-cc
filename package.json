@@ -2,6 +2,9 @@
   "name": "@opencode/claude-code-plugin",
   "version": "1.0.5",
   "private": true,
+  "files": [
+    "plugins/opencode/"
+  ],
   "type": "module",
   "description": "Use OpenCode from Claude Code to review code or delegate tasks.",
   "license": "Apache-2.0",

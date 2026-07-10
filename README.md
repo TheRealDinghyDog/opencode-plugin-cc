@@ -225,7 +225,7 @@ You can also use `/opencode:setup` to manage the optional review gate.
 /opencode:setup --disable-review-gate
 ```
 
-When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted OpenCode review based on Claude's response. If that review finds issues, the stop is blocked so Claude can address them first.
+When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted OpenCode review based on Claude's response. If that review finds issues, the stop is blocked so Claude can address them first. The gate also blocks stopping when the OpenCode reviewer is unavailable; restore OpenCode and rerun `/opencode:setup`, or disable the gate with `/opencode:setup --disable-review-gate`.
 
 > [!WARNING]
 > The review gate can create a long-running Claude/OpenCode loop and may drain usage limits quickly. Only enable it when you plan to actively monitor the session.
