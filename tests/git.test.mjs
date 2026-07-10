@@ -119,6 +119,25 @@ test("collectReviewContext skips broken untracked symlinks instead of crashing",
   assert.match(context.content, /skipped: broken symlink or unreadable file/i);
 });
 
+test("collectReviewContext does not read external untracked symlink targets", () => {
+  const cwd = makeTempDir();
+  const externalDir = makeTempDir("opencode-plugin-external-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "app.js"), "console.log('v1');\n");
+  run("git", ["add", "app.js"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  const externalFile = path.join(externalDir, "outside-secret.txt");
+  fs.writeFileSync(externalFile, "EXTERNAL_SYMLINK_SECRET_MARKER\n");
+  fs.symlinkSync(externalFile, path.join(cwd, "external-link.txt"));
+
+  const target = resolveReviewTarget(cwd, {});
+  const context = collectReviewContext(cwd, target);
+
+  assert.equal(target.mode, "working-tree");
+  assert.match(context.content, /### external-link\.txt/);
+  assert.doesNotMatch(context.content, /EXTERNAL_SYMLINK_SECRET_MARKER/);
+});
+
 test("collectReviewContext falls back to lightweight context for larger adversarial reviews", () => {
   const cwd = makeTempDir();
   initGitRepo(cwd);

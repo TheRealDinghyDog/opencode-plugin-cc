@@ -197,9 +197,19 @@ function formatUntrackedFile(cwd, relativePath) {
   const absolutePath = path.join(cwd, relativePath);
   let stat;
   try {
-    stat = fs.statSync(absolutePath);
+    stat = fs.lstatSync(absolutePath);
   } catch {
     return `### ${relativePath}\n(skipped: broken symlink or unreadable file)`;
+  }
+  if (stat.isSymbolicLink()) {
+    let linkTarget;
+    try {
+      linkTarget = fs.readlinkSync(absolutePath);
+      fs.lstatSync(path.resolve(path.dirname(absolutePath), linkTarget));
+    } catch {
+      return `### ${relativePath}\n(skipped: broken symlink or unreadable file)`;
+    }
+    return `### ${relativePath}\n${relativePath} -> ${linkTarget}`;
   }
   if (stat.isDirectory()) {
     return `### ${relativePath}\n(skipped: directory)`;
