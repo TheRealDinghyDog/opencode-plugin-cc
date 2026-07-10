@@ -103,14 +103,6 @@ function buildTaskSessionName(prompt) {
   return excerpt ? `${TASK_SESSION_PREFIX}: ${excerpt}` : TASK_SESSION_PREFIX;
 }
 
-function buildWritePermissionRules() {
-  // OpenCode's PermissionRule.permission is a free-form string but only real
-  // permission keys take effect, and the built-in `build` agent's own defaults
-  // still leave some categories on "ask". Use the same wildcard-allow rule the
-  // `build` agent ships with so headless write turns never stall on approval.
-  return [{ permission: "*", action: "allow", pattern: "*" }];
-}
-
 function buildCreateSessionParams(cwd, options = {}) {
   const write = Boolean(options.write);
   const agent = options.agent ?? (write ? WRITE_AGENT : READ_ONLY_AGENT);
@@ -119,14 +111,22 @@ function buildCreateSessionParams(cwd, options = {}) {
   // BadRequest — the model is selected per-message instead (buildMessageParams).
   // `directory` is not accepted either: the session inherits it from the
   // `opencode serve` working directory, which server-lifecycle spawns with
-  // `cwd`. `title` must be a string when present. Read-only turns rely on the
-  // read-only `plan` agent instead of a permission override.
+  // `cwd`. `title` must be a string when present.
+  //
+  // Deliberately no session-level `permission` rules for either mode. OpenCode
+  // appends session rules AFTER the agent's ruleset and resolves each request
+  // with the LAST matching rule, so any broad session rule silently overrides
+  // the stock agents' safety guards (`external_directory`, `.env` reads, and
+  // `doom_loop` stay on "ask") — and a session-level guard would likewise
+  // clobber the agent's allowances for OpenCode's own tool-output directories.
+  // Write turns rely on the stock `build` agent, read-only turns on the
+  // read-only `plan` agent; guard categories that reach "ask" are denied
+  // headlessly in respondToPermission (issue #26).
   const rawTitle = options.title ?? options.threadName ?? null;
   const title = typeof rawTitle === "string" && rawTitle.trim() ? rawTitle : null;
   return {
     agent,
-    ...(title ? { title } : {}),
-    ...(write ? { permission: buildWritePermissionRules() } : {})
+    ...(title ? { title } : {})
   };
 }
 
@@ -378,8 +378,7 @@ function createTurnCaptureState(sessionID, options = {}) {
     recoveryError: null,
     response: null,
     fallbackTimer: null,
-    onProgress: options.onProgress ?? null,
-    write: Boolean(options.write)
+    onProgress: options.onProgress ?? null
   };
 }
 
@@ -495,20 +494,38 @@ function applyMessageParts(state, parts, sessionID) {
   }
 }
 
+function describePermissionRequest(event) {
+  const category =
+    (typeof event?.permission === "string" ? event.permission : null) ??
+    (typeof event?.properties?.permission === "string" ? event.properties.permission : null);
+  const rawPatterns = event?.patterns ?? event?.properties?.patterns ?? null;
+  const patterns = Array.isArray(rawPatterns) ? rawPatterns.filter((value) => typeof value === "string") : [];
+  if (!category) {
+    return null;
+  }
+  return patterns.length > 0 ? `${category}: ${patterns.join(", ")}` : category;
+}
+
 async function respondToPermission(client, state, event, sessionID) {
   const permissionID = extractPermissionId(event);
   if (!permissionID || !sessionID) {
     return;
   }
 
-  const response = state.write ? "always" : "reject";
+  // Never self-approve, in write mode included. Headless turns have no human
+  // to ask, and under the stock agents a request only reaches "ask" when a
+  // safety guard trips (external-directory access, `.env` reads, doom-loop
+  // protection) or the user configured a category as interactive. Rejecting is
+  // the only answer that preserves those guards; the model sees the rejection
+  // and adapts (issue #26).
+  const described = describePermissionRequest(event);
   emitProgress(
     state.onProgress,
-    `${state.write ? "Allowing" : "Denying"} OpenCode permission request ${permissionID}.`,
-    state.write ? "running" : "investigating"
+    `Denying OpenCode permission request ${permissionID}${described ? ` (${described})` : ""}: headless runs never self-approve gated permissions.`,
+    "running"
   );
   try {
-    await client.respondPermission(sessionID, permissionID, response);
+    await client.respondPermission(sessionID, permissionID, "reject");
   } catch (error) {
     state.error = error;
     emitProgress(state.onProgress, `OpenCode permission response failed: ${error.message}`, "failed");
@@ -1118,7 +1135,6 @@ export async function runServerTurn(cwd, options = {}) {
           ),
         {
           onProgress: options.onProgress,
-          write,
           resumed: resumedSession,
           turnTimeoutMs: options.turnTimeoutMs
         }

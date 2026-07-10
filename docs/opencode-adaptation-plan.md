@@ -108,6 +108,7 @@ Claude Code
 ### Read-only vs write (the `sandbox` analog)
 - **Review / read-only task:** send the turn with `agent: "plan"` (OpenCode's read-only agent) and/or create the session with `permission` rules denying edits.
 - **`--write` task:** `agent: "build"` and create the session with `permission` rules set to `allow` for the edit/shell tools (equivalent to Codex `approvalPolicy: "never"` + `workspace-write`). In headless mode there's no human to approve, so the client must **auto-approve**: either pre-set `permission` on `POST /session`, or reply `allow` to `permission.asked` / `permission.v2.asked` events via `POST /session/{id}/permissions/{permID}`. Design the client to auto-approve in write mode and auto-deny-edits in read-only mode. **This is the single most important implementation detail to get right.**
+  - **Superseded (issue #26):** the auto-approve design above disables OpenCode's own safety guards. Session-level rules are merged *after* the agent ruleset with last-match-wins, so a broad session allow strips the stock `build` agent's `external_directory`/`.env`/`doom_loop` guards. The implementation now sends **no** session `permission` rules and **rejects** every headless `permission.asked` — under the stock agents an ask only fires when a guard trips.
 
 ### Model / effort mapping
 - `--model spark` → `openai/gpt-5.3-codex-spark`; `--model openai/gpt-5.4` → `{providerID:"openai", modelID:"gpt-5.4"}`; unset → OpenCode default. Add an alias map + a `provider/model` splitter.
