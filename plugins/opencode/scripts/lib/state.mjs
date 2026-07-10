@@ -282,10 +282,14 @@ function removeFileIfExists(filePath) {
   }
 }
 
-export function atomicWriteFile(filePath, contents) {
+export function atomicWriteFile(filePath, contents, options = {}) {
   const tempFile = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   try {
-    fs.writeFileSync(tempFile, contents, "utf8");
+    fs.writeFileSync(
+      tempFile,
+      contents,
+      options.mode == null ? "utf8" : { encoding: "utf8", mode: options.mode }
+    );
     fs.renameSync(tempFile, filePath);
   } catch (error) {
     try {

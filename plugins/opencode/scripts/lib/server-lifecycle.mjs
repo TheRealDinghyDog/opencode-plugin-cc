@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -11,6 +12,12 @@ import { atomicWriteFile, resolveStateDir } from "./state.mjs";
 export const SERVER_URL_ENV = "OPENCODE_COMPANION_SERVER_URL";
 export const PID_FILE_ENV = "OPENCODE_COMPANION_SERVER_PID_FILE";
 export const LOG_FILE_ENV = "OPENCODE_COMPANION_SERVER_LOG_FILE";
+// OpenCode's own server-auth variables (not plugin-specific): when the
+// password is set, `opencode serve` requires HTTP Basic auth on every route.
+export const SERVER_PASSWORD_ENV = "OPENCODE_SERVER_PASSWORD";
+export const SERVER_USERNAME_ENV = "OPENCODE_SERVER_USERNAME";
+
+const OWNED_SERVER_USERNAME = "opencode";
 
 const SERVER_STATE_FILE = "server.json";
 const SERVER_LOCK_DIR = "server.lock";
@@ -57,7 +64,19 @@ export function loadServerSession(cwd) {
 export function saveServerSession(cwd, session) {
   const stateDir = resolveStateDir(cwd);
   fs.mkdirSync(stateDir, { recursive: true });
-  atomicWriteFile(resolveServerStateFile(cwd), `${JSON.stringify(session, null, 2)}\n`);
+  // server.json carries the owned server's password; keep it owner-only.
+  atomicWriteFile(resolveServerStateFile(cwd), `${JSON.stringify(session, null, 2)}\n`, { mode: 0o600 });
+}
+
+export function serverSessionCredentials(session) {
+  return {
+    password: typeof session?.password === "string" && session.password ? session.password : null,
+    username: typeof session?.username === "string" && session.username ? session.username : undefined
+  };
+}
+
+function generateServerPassword() {
+  return crypto.randomBytes(24).toString("base64url");
 }
 
 export function clearServerSession(cwd) {
@@ -77,14 +96,14 @@ async function withTimeout(fn, timeoutMs) {
   }
 }
 
-export async function isServerHealthy(url, timeoutMs = 500) {
+export async function isServerHealthy(url, timeoutMs = 500, credentials = {}) {
   const normalized = normalizeUrl(url);
   if (!normalized) {
     return false;
   }
 
   try {
-    const client = new OpencodeServerClient(normalized);
+    const client = new OpencodeServerClient(normalized, credentials);
     await withTimeout((signal) => client.health({ signal }), timeoutMs);
     return true;
   } catch {
@@ -92,10 +111,10 @@ export async function isServerHealthy(url, timeoutMs = 500) {
   }
 }
 
-async function waitForServerHealth(url, timeoutMs = 10000) {
+async function waitForServerHealth(url, timeoutMs = 10000, credentials = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await isServerHealthy(url, 500)) {
+    if (await isServerHealthy(url, 500, credentials)) {
       return true;
     }
     await sleep(100);
@@ -189,7 +208,7 @@ function releaseServerLock(lockDir, token) {
 
 async function loadHealthyServerSession(cwd, healthTimeoutMs) {
   const existing = loadServerSession(cwd);
-  if (existing?.url && (await isServerHealthy(existing.url, healthTimeoutMs))) {
+  if (existing?.url && (await isServerHealthy(existing.url, healthTimeoutMs, serverSessionCredentials(existing)))) {
     return existing;
   }
   return null;
@@ -315,11 +334,17 @@ function findOpenPort(hostname = DEFAULT_HOSTNAME) {
   });
 }
 
-export function spawnServerProcess({ cwd, port, hostname = DEFAULT_HOSTNAME, pidFile, logFile, env = process.env }) {
+export function spawnServerProcess({ cwd, port, hostname = DEFAULT_HOSTNAME, pidFile, logFile, env = process.env, password = null }) {
+  // Pass the generated password via the child environment only — never argv,
+  // which any local user could read from the process list. Pin the username so
+  // an ambient OPENCODE_SERVER_USERNAME cannot desynchronize server and client.
+  const childEnv = password
+    ? { ...env, [SERVER_PASSWORD_ENV]: password, [SERVER_USERNAME_ENV]: OWNED_SERVER_USERNAME }
+    : env;
   const logFd = fs.openSync(logFile, "a");
   const child = spawn("opencode", ["serve", "--hostname", hostname, "--port", String(port)], {
     cwd,
-    env,
+    env: childEnv,
     detached: true,
     stdio: ["ignore", logFd, logFd],
     windowsHide: true,
@@ -360,15 +385,35 @@ function killServerPid(pid, killProcess = null) {
 }
 
 export async function ensureServer(cwd, options = {}) {
-  const overrideUrl = normalizeUrl(options.serverUrl ?? options.env?.[SERVER_URL_ENV] ?? process.env[SERVER_URL_ENV]);
+  const envSource = options.env ?? process.env;
+  const overrideUrl = normalizeUrl(options.serverUrl ?? envSource[SERVER_URL_ENV] ?? process.env[SERVER_URL_ENV]);
   if (overrideUrl) {
-    if (!(await isServerHealthy(overrideUrl, options.healthTimeoutMs ?? 1000))) {
+    // A password-protected external server uses the same variables OpenCode's
+    // own tooling reads, so a user who secured their server has already
+    // exported them.
+    const credentials = {
+      password: envSource[SERVER_PASSWORD_ENV] || null,
+      username: envSource[SERVER_USERNAME_ENV] || undefined
+    };
+    try {
+      const client = new OpencodeServerClient(overrideUrl, credentials);
+      await withTimeout((signal) => client.health({ signal }), options.healthTimeoutMs ?? 1000);
+    } catch (error) {
+      if (error?.status === 401) {
+        throw new Error(
+          credentials.password
+            ? `Configured OpenCode server rejected the provided credentials (HTTP 401): ${overrideUrl}. Check ${SERVER_PASSWORD_ENV} and ${SERVER_USERNAME_ENV}.`
+            : `Configured OpenCode server requires authentication: ${overrideUrl}. Export ${SERVER_PASSWORD_ENV} (and ${SERVER_USERNAME_ENV} unless it is "opencode") so the plugin can connect.`
+        );
+      }
       throw new Error(`Configured OpenCode server is not healthy: ${overrideUrl}`);
     }
     return {
       url: overrideUrl,
       pid: null,
-      external: true
+      external: true,
+      password: credentials.password,
+      username: credentials.username ?? null
     };
   }
 
@@ -387,7 +432,7 @@ export async function ensureServer(cwd, options = {}) {
 
     const staleExisting = loadServerSession(cwd);
     if (staleExisting) {
-      const { url, pidFile, logFile, sessionDir, pid, external } = staleExisting;
+      const { url, pidFile, logFile, sessionDir, pid, external, password, username } = staleExisting;
       // The server lock is already held here; intentionally omit cwd so teardown
       // uses the unlocked path even if the persisted session schema grows.
       await teardownServerSession({
@@ -397,6 +442,8 @@ export async function ensureServer(cwd, options = {}) {
         sessionDir,
         pid,
         external,
+        password,
+        username,
         killProcess: options.killProcess ?? null
       });
       clearServerSession(cwd);
@@ -408,16 +455,23 @@ export async function ensureServer(cwd, options = {}) {
     const sessionDir = createServerSessionDir();
     const pidFile = path.join(sessionDir, "opencode-server.pid");
     const logFile = path.join(sessionDir, "opencode-server.log");
+    // Every plugin-owned server gets its own random password so no other local
+    // process can reach the API on the loopback port (issue #27).
+    const password = generateServerPassword();
     const child = spawnServerProcess({
       cwd,
       hostname,
       port,
       pidFile,
       logFile,
-      env: options.env ?? process.env
+      env: options.env ?? process.env,
+      password
     });
 
-    const ready = await waitForServerHealth(url, options.timeoutMs ?? 10000);
+    const ready = await waitForServerHealth(url, options.timeoutMs ?? 10000, {
+      password,
+      username: OWNED_SERVER_USERNAME
+    });
     if (!ready) {
       await teardownServerSession({
         url,
@@ -425,6 +479,8 @@ export async function ensureServer(cwd, options = {}) {
         logFile,
         sessionDir,
         pid: child.pid ?? null,
+        password,
+        username: OWNED_SERVER_USERNAME,
         killProcess: options.killProcess ?? null
       });
       return null;
@@ -436,7 +492,9 @@ export async function ensureServer(cwd, options = {}) {
       pidFile,
       logFile,
       sessionDir,
-      external: false
+      external: false,
+      password,
+      username: OWNED_SERVER_USERNAME
     };
     const leasedSession = addServerLease(session, options);
     saveServerSession(cwd, leasedSession);
@@ -453,14 +511,18 @@ async function teardownServerSessionUnlocked({
   sessionDir = null,
   pid = null,
   external = false,
+  password = null,
+  username = null,
   killProcess = null
 } = {}) {
   if (url && !external) {
     try {
-      const client = new OpencodeServerClient(url);
+      const client = new OpencodeServerClient(url, { password, username: username ?? undefined });
+      // Dispose only cleans up instance state; on 1.17.15 it does NOT stop the
+      // HTTP listener, so the PID termination below is the actual shutdown.
       await withTimeout((signal) => client.dispose({ signal }), 1000);
     } catch {
-      // Fall back to process termination below.
+      // Instance cleanup is best-effort; process termination below still runs.
     }
   }
 
@@ -504,6 +566,8 @@ export async function teardownServerSession({
   sessionDir = null,
   pid = null,
   external = false,
+  password = null,
+  username = null,
   killProcess = null
 } = {}) {
   if (!cwd) {
@@ -514,6 +578,8 @@ export async function teardownServerSession({
       sessionDir,
       pid,
       external,
+      password,
+      username,
       killProcess
     });
   }
@@ -547,6 +613,8 @@ export async function teardownServerSession({
       sessionDir: session?.sessionDir ?? sessionDir,
       pid: session?.pid ?? pid,
       external: Boolean(session?.external ?? external),
+      password: session?.password ?? password,
+      username: session?.username ?? username,
       killProcess
     };
     const result = await teardownServerSessionUnlocked(teardownTarget);

@@ -691,6 +691,56 @@ test("write task denies gated permission asks and keeps stock agent guards (issu
   }
 });
 
+test("plugin-owned server requires auth for HTTP and SSE and never leaks the password (issue #27)", { skip: LOCAL_LISTEN_SKIP }, async () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+  const env = buildTestEnv(binDir, { CLAUDE_PLUGIN_DATA: pluginDataDir });
+
+  try {
+    // The task completing at all proves the authenticated health, HTTP, and
+    // SSE paths work: the fixture 401s every unauthenticated route once the
+    // lifecycle passes it a generated password.
+    const result = run("node", [SCRIPT, "task", "--json", "auth roundtrip"], { cwd: repo, env });
+    assert.equal(result.status, 0, result.stderr);
+
+    await withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, async () => {
+      const session = loadServerSession(repo);
+      assert.ok(session?.url, "server session persisted");
+      assert.ok(
+        typeof session.password === "string" && session.password.length >= 24,
+        "owned server records a generated password"
+      );
+      assert.equal(session.username, "opencode");
+
+      if (process.platform !== "win32") {
+        const stateFile = path.join(resolveStateDir(repo), "server.json");
+        assert.equal(fs.statSync(stateFile).mode & 0o777, 0o600, "server.json must be owner-only");
+      }
+
+      const unauthorizedHttp = await fetch(`${session.url}/session`);
+      assert.equal(unauthorizedHttp.status, 401);
+      await unauthorizedHttp.text().catch(() => {});
+      const unauthorizedSse = await fetch(`${session.url}/event`, { headers: { accept: "text/event-stream" } });
+      assert.equal(unauthorizedSse.status, 401);
+      await unauthorizedSse.body?.cancel().catch(() => {});
+
+      const authorization = `Basic ${Buffer.from(`${session.username}:${session.password}`).toString("base64")}`;
+      const authorized = await fetch(`${session.url}/session`, { headers: { authorization } });
+      assert.equal(authorized.status, 200);
+      await authorized.text().catch(() => {});
+
+      const status = run("node", [SCRIPT, "status", "--json"], { cwd: repo, env });
+      assert.equal(status.status, 0, status.stderr);
+      assert.ok(!status.stdout.includes(session.password), "status output must not contain the server password");
+    });
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
 test("task forwards spark model alias and effort as OpenCode variant", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
