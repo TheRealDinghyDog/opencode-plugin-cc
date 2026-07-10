@@ -63,9 +63,13 @@ test("command and skill filenames use OpenCode identity", () => {
 
 test("setup command offers OpenCode installation guidance", () => {
   const setup = read("commands/setup.md");
+  const companion = read("scripts/opencode-companion.mjs");
   assert.match(setup, /description: Check whether the local OpenCode CLI is ready/);
+  assert.match(setup, /fail-closed stop-time review gate/);
   assert.match(setup, /npm install -g opencode-ai/);
   assert.doesNotMatch(setup, /@openai\/codex/);
+  assert.match(companion, /OpenCode reviewer is unavailable/);
+  assert.match(companion, /--disable-review-gate/);
 });
 
 test("hooks keep session-end cleanup and stop gating enabled", () => {
