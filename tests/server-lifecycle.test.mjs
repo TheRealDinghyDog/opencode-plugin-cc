@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { makeTempDir } from "./helpers.mjs";
 import { ensureServer, isServerHealthy, loadServerSession, saveServerSession, teardownServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
 import { resolveStateDir } from "../plugins/opencode/scripts/lib/state.mjs";
+import { commandLineLooksLikeOpencodeServe } from "../plugins/opencode/scripts/lib/process.mjs";
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {
@@ -233,7 +234,8 @@ test("teardownServerSession can ignore only this process lease", async () => {
       ignoreCurrentProcessLease: true,
       killProcess: (pid) => {
         killedPid = pid;
-      }
+      },
+      readProcessCommandLineImpl: () => "opencode serve --hostname 127.0.0.1 --port 1"
     });
 
     assert.equal(result.skipped, false);
@@ -443,7 +445,8 @@ test("teardownServerSession expires a lease whose pid reports EPERM", async () =
       pid: session.pid,
       killProcess: (pid) => {
         killedPid = pid;
-      }
+      },
+      readProcessCommandLineImpl: () => "opencode serve --hostname 127.0.0.1 --port 1"
     });
 
     assert.equal(result.skipped, false);
@@ -457,6 +460,222 @@ test("teardownServerSession expires a lease whose pid reports EPERM", async () =
       process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
     }
   }
+});
+
+test("teardownServerSession signals the process when the persisted identity matches the live command line", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const session = {
+    url: "http://127.0.0.1:1",
+    pid: 123456,
+    pidFile: null,
+    logFile: null,
+    sessionDir: null,
+    external: false,
+    port: 8080,
+    pidCommandLine: "opencode serve --hostname 127.0.0.1 --port 8080",
+    leases: []
+  };
+  saveServerSession(workspace, session);
+
+  let killedPid = null;
+  try {
+    const result = await teardownServerSession({
+      cwd: workspace,
+      url: session.url,
+      pid: session.pid,
+      killProcess: (pid) => {
+        killedPid = pid;
+      },
+      readProcessCommandLineImpl: () => "opencode serve --hostname 127.0.0.1 --port 8080"
+    });
+
+    assert.equal(result.skipped, false);
+    assert.equal(killedPid, session.pid);
+    assert.equal(loadServerSession(workspace), null);
+  } finally {
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("teardownServerSession does NOT signal and clears the record when the live command line differs (PID reused)", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const session = {
+    url: "http://127.0.0.1:1",
+    pid: 123456,
+    pidFile: null,
+    logFile: null,
+    sessionDir: null,
+    external: false,
+    port: 8080,
+    pidCommandLine: "opencode serve --hostname 127.0.0.1 --port 8080",
+    leases: []
+  };
+  saveServerSession(workspace, session);
+
+  let killedPid = null;
+  try {
+    const result = await teardownServerSession({
+      cwd: workspace,
+      url: session.url,
+      pid: session.pid,
+      killProcess: (pid) => {
+        killedPid = pid;
+      },
+      readProcessCommandLineImpl: () => "node /opt/unrelated/server.js --port 3000"
+    });
+
+    // The teardown itself ran (metadata cleared, record removed); only the
+    // kill was withheld — `skipped` keeps meaning "teardown did not run".
+    assert.equal(result.skipped, false);
+    assert.equal(result.killSkipped, true);
+    assert.equal(result.reason, "identity-mismatch");
+    assert.match(result.diagnostic, /Left PID 123456 untouched/);
+    assert.equal(killedPid, null);
+    assert.equal(loadServerSession(workspace), null);
+  } finally {
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("teardownServerSession does NOT signal when the command line cannot be read", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const session = {
+    url: "http://127.0.0.1:1",
+    pid: 123456,
+    pidFile: null,
+    logFile: null,
+    sessionDir: null,
+    external: false,
+    port: 8080,
+    pidCommandLine: "opencode serve --hostname 127.0.0.1 --port 8080",
+    leases: []
+  };
+  saveServerSession(workspace, session);
+
+  let killedPid = null;
+  try {
+    const result = await teardownServerSession({
+      cwd: workspace,
+      url: session.url,
+      pid: session.pid,
+      killProcess: (pid) => {
+        killedPid = pid;
+      },
+      readProcessCommandLineImpl: () => null
+    });
+
+    assert.equal(result.skipped, false);
+    assert.equal(result.killSkipped, true);
+    assert.equal(result.reason, "identity-unverified");
+    assert.equal(killedPid, null);
+    assert.equal(loadServerSession(workspace), null);
+  } finally {
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("teardownServerSession verifies legacy records via the port derived from the persisted url", async () => {
+  const workspace = makeTempDir();
+  const pluginDataDir = makeTempDir();
+  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  // A record written before the identity fields existed: no `port`, no
+  // `pidCommandLine`. Verification must still work (the URL carries the port)
+  // instead of falling open and killing blind.
+  const session = {
+    url: "http://127.0.0.1:43117",
+    pid: 123456,
+    pidFile: null,
+    logFile: null,
+    sessionDir: null,
+    external: false,
+    leases: []
+  };
+  saveServerSession(workspace, session);
+
+  try {
+    let killedPid = null;
+    const matched = await teardownServerSession({
+      cwd: workspace,
+      url: session.url,
+      pid: session.pid,
+      killProcess: (pid) => {
+        killedPid = pid;
+      },
+      readProcessCommandLineImpl: () => "/usr/local/bin/opencode serve --hostname 127.0.0.1 --port 43117"
+    });
+    assert.equal(matched.skipped, false);
+    assert.equal(matched.killSkipped, undefined);
+    assert.equal(killedPid, session.pid);
+    assert.equal(loadServerSession(workspace), null);
+
+    // Same legacy record, but the PID now belongs to something else: no kill.
+    saveServerSession(workspace, session);
+    killedPid = null;
+    const reused = await teardownServerSession({
+      cwd: workspace,
+      url: session.url,
+      pid: session.pid,
+      killProcess: (pid) => {
+        killedPid = pid;
+      },
+      readProcessCommandLineImpl: () => "postgres: writer process"
+    });
+    assert.equal(reused.killSkipped, true);
+    assert.equal(reused.reason, "identity-mismatch");
+    assert.equal(killedPid, null);
+    assert.equal(loadServerSession(workspace), null);
+  } finally {
+    if (previousPluginDataDir == null) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
+});
+
+test("commandLineLooksLikeOpencodeServe matches shell-wrapped Windows command lines", () => {
+  assert.equal(
+    commandLineLooksLikeOpencodeServe('C:\\Windows\\system32\\cmd.exe /c "opencode serve --hostname 127.0.0.1 --port 5150"', {
+      port: 5150
+    }),
+    true
+  );
+  assert.equal(
+    commandLineLooksLikeOpencodeServe("/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 5150", { port: 5150 }),
+    true
+  );
+  // Same port, different program: must not match.
+  assert.equal(
+    commandLineLooksLikeOpencodeServe("node /srv/other-tool serve --port 5150", { port: 5150 }),
+    false
+  );
+  // Right program, wrong port: must not match.
+  assert.equal(
+    commandLineLooksLikeOpencodeServe("/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 5151", { port: 5150 }),
+    false
+  );
 });
 
 test("saveServerSession preserves the existing session when its atomic rename fails", () => {

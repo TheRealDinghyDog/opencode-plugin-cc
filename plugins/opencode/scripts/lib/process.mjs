@@ -174,6 +174,46 @@ export function commandLineLooksLikeTaskWorker(commandLine, { jobId } = {}) {
   );
 }
 
+function tokensContainPort(tokens, port) {
+  const expected = String(port ?? "");
+  if (!expected) {
+    return false;
+  }
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index] === "--port" && tokens[index + 1] === expected) {
+      return true;
+    }
+    if (tokens[index] === `--port=${expected}`) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function commandLineLooksLikeOpencodeServe(commandLine, { port } = {}) {
+  // On win32 the server is spawned through a shell, so `ps`/PowerShell can
+  // report the whole invocation as one quoted blob (`cmd.exe /c "opencode
+  // serve --port N"`). Re-split compound tokens so the matcher sees the real
+  // arguments on every platform.
+  const tokens = commandLineTokens(commandLine).flatMap((token) =>
+    /\s/.test(token) ? token.split(/\s+/).filter(Boolean) : [token]
+  );
+  // Require an opencode-ish executable token in addition to `serve --port N`.
+  // Matches the real binary (/opt/homebrew/bin/opencode), test fixtures
+  // (<tmp>/opencode), and Windows shims (opencode.cmd).
+  if (!tokens.some((token) => path.basename(token).toLowerCase().startsWith("opencode"))) {
+    return false;
+  }
+  if (!tokens.includes("serve")) {
+    return false;
+  }
+  if (!tokensContainPort(tokens, port)) {
+    return false;
+  }
+  return true;
+}
+
 export function readProcessCommandLine(pid, options = {}) {
   if (!Number.isFinite(pid)) {
     return null;

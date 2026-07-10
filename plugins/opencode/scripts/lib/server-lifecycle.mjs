@@ -7,6 +7,7 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 
 import { OpencodeServerClient } from "./opencode-server.mjs";
+import { commandLineLooksLikeOpencodeServe, readProcessCommandLine } from "./process.mjs";
 import { atomicWriteFile, resolveStateDir } from "./state.mjs";
 
 export const SERVER_URL_ENV = "OPENCODE_COMPANION_SERVER_URL";
@@ -432,7 +433,7 @@ export async function ensureServer(cwd, options = {}) {
 
     const staleExisting = loadServerSession(cwd);
     if (staleExisting) {
-      const { url, pidFile, logFile, sessionDir, pid, external, password, username } = staleExisting;
+      const { url, pidFile, logFile, sessionDir, pid, external, password, username, port } = staleExisting;
       // The server lock is already held here; intentionally omit cwd so teardown
       // uses the unlocked path even if the persisted session schema grows.
       await teardownServerSession({
@@ -444,7 +445,9 @@ export async function ensureServer(cwd, options = {}) {
         external,
         password,
         username,
-        killProcess: options.killProcess ?? null
+        port,
+        killProcess: options.killProcess ?? null,
+        readProcessCommandLineImpl: options.readProcessCommandLineImpl ?? null
       });
       clearServerSession(cwd);
     }
@@ -467,6 +470,10 @@ export async function ensureServer(cwd, options = {}) {
       env: options.env ?? process.env,
       password
     });
+    // Recorded for forensics (compare against the live command line when an
+    // identity-mismatch teardown skip is investigated); verification itself
+    // matches the LIVE command line against `opencode serve --port <port>`.
+    const pidCommandLine = readProcessCommandLine(child.pid, options);
 
     const ready = await waitForServerHealth(url, options.timeoutMs ?? 10000, {
       password,
@@ -481,7 +488,9 @@ export async function ensureServer(cwd, options = {}) {
         pid: child.pid ?? null,
         password,
         username: OWNED_SERVER_USERNAME,
-        killProcess: options.killProcess ?? null
+        port,
+        killProcess: options.killProcess ?? null,
+        readProcessCommandLineImpl: options.readProcessCommandLineImpl ?? null
       });
       return null;
     }
@@ -494,7 +503,9 @@ export async function ensureServer(cwd, options = {}) {
       sessionDir,
       external: false,
       password,
-      username: OWNED_SERVER_USERNAME
+      username: OWNED_SERVER_USERNAME,
+      port,
+      pidCommandLine
     };
     const leasedSession = addServerLease(session, options);
     saveServerSession(cwd, leasedSession);
@@ -502,6 +513,37 @@ export async function ensureServer(cwd, options = {}) {
   } finally {
     lock.release?.();
   }
+}
+
+function parseServerUrlPort(url) {
+  try {
+    const port = Number(new URL(String(url ?? "")).port);
+    return Number.isInteger(port) && port > 0 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+// Fail-closed PID identity check (issue #31): only signal a PID when its live
+// command line still looks like the plugin-owned `opencode serve` instance for
+// this session's port. The port always exists for owned sessions — it is part
+// of the persisted URL — so records written before the explicit identity
+// fields existed remain verifiable. Anything unverifiable is left untouched;
+// only the stale metadata is cleared.
+function verifyServerPidIdentity(pid, { url = null, port = null, readProcessCommandLineImpl = null } = {}) {
+  const expectedPort = Number.isFinite(port) ? Number(port) : parseServerUrlPort(url);
+  if (!Number.isFinite(expectedPort)) {
+    return { verified: false, reason: "identity-unverified" };
+  }
+  const readCommandLine = readProcessCommandLineImpl ?? readProcessCommandLine;
+  const commandLine = readCommandLine(pid);
+  if (!commandLine) {
+    return { verified: false, reason: "identity-unverified" };
+  }
+  if (!commandLineLooksLikeOpencodeServe(commandLine, { port: expectedPort })) {
+    return { verified: false, reason: "identity-mismatch" };
+  }
+  return { verified: true, reason: null };
 }
 
 async function teardownServerSessionUnlocked({
@@ -513,7 +555,9 @@ async function teardownServerSessionUnlocked({
   external = false,
   password = null,
   username = null,
-  killProcess = null
+  killProcess = null,
+  port = null,
+  readProcessCommandLineImpl = null
 } = {}) {
   if (url && !external) {
     try {
@@ -526,11 +570,17 @@ async function teardownServerSessionUnlocked({
     }
   }
 
+  let killSkippedReason = null;
   if (!external && Number.isFinite(pid)) {
-    try {
-      killServerPid(pid, killProcess);
-    } catch {
-      // Ignore teardown failures during Claude session shutdown.
+    const identity = verifyServerPidIdentity(pid, { url, port, readProcessCommandLineImpl });
+    if (identity.verified) {
+      try {
+        killServerPid(pid, killProcess);
+      } catch {
+        // Ignore teardown failures during Claude session shutdown.
+      }
+    } else {
+      killSkippedReason = identity.reason;
     }
   }
 
@@ -548,6 +598,18 @@ async function teardownServerSessionUnlocked({
     } catch {
       // Ignore non-empty or missing directories.
     }
+  }
+
+  if (killSkippedReason) {
+    // Metadata is cleared (so callers still clear the session record), but the
+    // process was deliberately left untouched. `skipped` keeps its existing
+    // meaning of "teardown did not run at all" (leases / lock timeouts).
+    return {
+      skipped: false,
+      killSkipped: true,
+      reason: killSkippedReason,
+      diagnostic: `Left PID ${pid} untouched (${killSkippedReason}); cleared stale OpenCode server metadata only.`
+    };
   }
 
   return { skipped: false };
@@ -568,7 +630,9 @@ export async function teardownServerSession({
   external = false,
   password = null,
   username = null,
-  killProcess = null
+  killProcess = null,
+  port = null,
+  readProcessCommandLineImpl = null
 } = {}) {
   if (!cwd) {
     return teardownServerSessionUnlocked({
@@ -580,7 +644,9 @@ export async function teardownServerSession({
       external,
       password,
       username,
-      killProcess
+      killProcess,
+      port,
+      readProcessCommandLineImpl
     });
   }
 
@@ -615,7 +681,9 @@ export async function teardownServerSession({
       external: Boolean(session?.external ?? external),
       password: session?.password ?? password,
       username: session?.username ?? username,
-      killProcess
+      killProcess,
+      port: session?.port ?? port,
+      readProcessCommandLineImpl
     };
     const result = await teardownServerSessionUnlocked(teardownTarget);
     if (session) {
