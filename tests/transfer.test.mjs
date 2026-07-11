@@ -68,8 +68,8 @@ test("Claude JSONL converts to a well-formed OpenCode import document", () => {
   assert.equal(doc.info.slug, "investigate-the-failure");
   assert.equal(doc.info.agent, "build");
   assert.deepEqual(doc.info.model, {
-    id: "gpt-5.4-mini",
-    providerID: "openai",
+    id: "imported-transcript",
+    providerID: "claude-code",
     variant: "default"
   });
   assert.equal(doc.info.version, "1.17.10-test");
@@ -179,7 +179,9 @@ test("transfer imports a Claude transcript and prints an OpenCode resume command
   fs.writeFileSync(transcriptPath, sampleClaudeJsonl(), "utf8");
 
   const env = buildEnv(binDir, {
+    // os.homedir() reads USERPROFILE on Windows and HOME elsewhere.
     HOME: home,
+    USERPROFILE: home,
     OPENCODE_COMPANION_TRANSCRIPT_PATH: transcriptPath
   });
   const result = run("node", [SCRIPT, "transfer"], {

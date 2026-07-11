@@ -26,7 +26,7 @@ The plugin starts its own local `opencode serve` on demand, bound to `127.0.0.1`
 Add the marketplace in Claude Code:
 
 ```bash
-/plugin marketplace add opencode
+/plugin marketplace add TheRealDinghyDog/opencode-plugin-cc
 ```
 
 Install the plugin:

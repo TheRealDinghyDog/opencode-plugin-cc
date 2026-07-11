@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { interruptServerTurn, runServerTurn } from "../plugins/opencode/scripts/lib/opencode.mjs";
 import { loadServerSession, saveServerSession, SERVER_URL_ENV } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
@@ -154,9 +154,10 @@ function startExternalFixtureServer(binDir) {
   return { child, url };
 }
 
-test("interruptServerTurn marks env-provided server urls as external", async () => {
-  const workspace = makeTempDir();
-  const binDir = makeTempDir();
+// Hand-rolled availability-only opencode stub (no HTTP server). Mirrors
+// installFakeOpencode's Windows shim: a bare shebang script is not executable
+// via PATH on win32, so binaryAvailable() would report opencode missing there.
+function installStubOpencodeBinary(binDir) {
   writeExecutable(
     path.join(binDir, "opencode"),
     `#!/usr/bin/env node
@@ -171,6 +172,17 @@ if (process.argv[2] === "serve" && process.argv.includes("--help")) {
 process.exit(1);
 `
   );
+  if (process.platform === "win32") {
+    fs.writeFileSync(path.join(binDir, "opencode.cmd"), `@echo off\r\nnode "%~dp0opencode" %*\r\n`, {
+      encoding: "utf8"
+    });
+  }
+}
+
+test("interruptServerTurn marks env-provided server urls as external", async () => {
+  const workspace = makeTempDir();
+  const binDir = makeTempDir();
+  installStubOpencodeBinary(binDir);
   const previousFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (requestUrl, options = {}) => {
@@ -492,12 +504,12 @@ test("external server requests are bound to each invoking workspace (issue #29)"
     // to the invoking repo, not the server process's launch directory.
     const fakeState = readFakeState(binDir);
     const directories = fakeState.sessions.map((session) => session.directory).sort();
-    assert.deepEqual(directories, [fs.realpathSync(repoA), fs.realpathSync(repoB)].sort());
+    assert.deepEqual(directories, [fs.realpathSync.native(repoA), fs.realpathSync.native(repoB)].sort());
 
     // The event subscriptions carried the workspace scope too.
     const eventDirectories = (fakeState.eventDirectories || []).filter(Boolean);
-    assert.ok(eventDirectories.includes(fs.realpathSync(repoA)), "event stream scoped to workspace A");
-    assert.ok(eventDirectories.includes(fs.realpathSync(repoB)), "event stream scoped to workspace B");
+    assert.ok(eventDirectories.includes(fs.realpathSync.native(repoA)), "event stream scoped to workspace A");
+    assert.ok(eventDirectories.includes(fs.realpathSync.native(repoB)), "event stream scoped to workspace B");
   } finally {
     child.kill();
   }
@@ -609,20 +621,7 @@ globalThis.fetch = async (requestUrl, options = {}) => {
 `,
     "utf8"
   );
-  writeExecutable(
-    path.join(binDir, "opencode"),
-    `#!/usr/bin/env node
-if (process.argv[2] === "--version") {
-  console.log("opencode test");
-  process.exit(0);
-}
-if (process.argv[2] === "serve" && process.argv.includes("--help")) {
-  console.log("serve help");
-  process.exit(0);
-}
-process.exit(1);
-`
-  );
+  installStubOpencodeBinary(binDir);
 
   await withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, async () => {
     const jobId = "job-cancel-external-server";
@@ -649,7 +648,9 @@ process.exit(1);
     });
     writeJobFile(workspace, jobId, runningJob);
 
-    const result = run(process.execPath, ["--import", fetchPreload, SCRIPT, "cancel", jobId, "--cwd", workspace, "--json"], {
+    // --import requires a file:// URL on Windows (a bare D:\... path parses as
+    // an unsupported "d:" URL scheme).
+    const result = run(process.execPath, ["--import", pathToFileURL(fetchPreload).href, SCRIPT, "cancel", jobId, "--cwd", workspace, "--json"], {
       cwd: workspace,
       env: {
         ...process.env,
@@ -1108,7 +1109,7 @@ test("task fails closed when a resumed-session snapshot fails and only stale mes
         sessions: [
           {
             id: "ses_existing",
-            directory: fs.realpathSync(repo),
+            directory: fs.realpathSync.native(repo),
             title: "OpenCode Companion Task: prior fixture task",
             agent: "plan",
             model: null,
@@ -1268,7 +1269,7 @@ test("task fails when completion has no recoverable current-turn message (issue 
             id: "ses_existing",
             // realpath: makeTempDir returns a symlinked /var path on macOS, but
             // findLatestTaskThread matches against the realpath'd workspace root.
-            directory: fs.realpathSync(repo),
+            directory: fs.realpathSync.native(repo),
             title: "OpenCode Companion Task: prior fixture task",
             agent: "plan",
             model: null,

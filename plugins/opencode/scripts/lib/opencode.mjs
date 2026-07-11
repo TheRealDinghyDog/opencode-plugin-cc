@@ -1074,12 +1074,20 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
 }
 
 // The canonical (symlink-resolved) workspace path is what OpenCode records as
-// a session's directory, so use it for the client's directory scope.
+// a session's directory, so use it for the client's directory scope. Use the
+// native resolver: unlike the JS implementation it also expands Windows 8.3
+// short names (RUNNER~1 -> runneradmin) and normalizes separators, so the
+// value matches what a child process sees as its cwd. Same choice as
+// resolveStateDir in state.mjs.
 function canonicalWorkspaceDirectory(cwd) {
   try {
-    return fs.realpathSync(cwd);
+    return fs.realpathSync.native(cwd);
   } catch {
-    return cwd;
+    try {
+      return fs.realpathSync(cwd);
+    } catch {
+      return cwd;
+    }
   }
 }
 
@@ -1423,7 +1431,7 @@ export async function runServerTurn(cwd, options = {}) {
       });
       const session = await client.createSession(
         buildCreateSessionParams(cwd, {
-          title: options.threadName ?? options.title ?? (options.persistThread ? buildTaskSessionName(prompt) : null),
+          title: options.threadName ?? options.title ?? (options.taskSessionTitle ? buildTaskSessionName(prompt) : null),
           model: options.model,
           write,
           agent
@@ -1508,7 +1516,9 @@ export async function runServerReview(cwd, options = {}) {
     ...options,
     agent: READ_ONLY_AGENT,
     sandbox: "read-only",
-    persistThread: false,
+    // Review sessions intentionally remain in OpenCode's session store so
+    // users can reopen them with `opencode --session <id>`.
+    taskSessionTitle: false,
     threadName: options.threadName ?? "OpenCode Review"
   });
   return {
@@ -1524,12 +1534,16 @@ export async function findLatestTaskThread(cwd) {
     throw new Error("OpenCode CLI is not installed or is missing headless server support. Install OpenCode, then rerun `/opencode:setup`.");
   }
 
+  // Compare canonical-to-canonical: stored session directories originate from
+  // the canonical directory the client sends, while `cwd` here can be git's
+  // forward-slash toplevel (Windows) or a symlinked path (macOS /var).
+  const canonicalCwd = canonicalWorkspaceDirectory(cwd);
   return withServer(cwd, async (client) => {
     const sessions = getSessionsArray(await client.listSessions())
       .filter((session) => sessionTitle(session).startsWith(TASK_SESSION_PREFIX))
       .filter((session) => {
         const directory = sessionDirectory(session);
-        return !directory || directory === cwd;
+        return !directory || directory === canonicalCwd;
       })
       .sort((left, right) => sessionUpdatedAt(right) - sessionUpdatedAt(left));
     return sessions[0] ?? null;
