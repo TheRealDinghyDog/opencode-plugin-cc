@@ -179,7 +179,9 @@ test("transfer imports a Claude transcript and prints an OpenCode resume command
   fs.writeFileSync(transcriptPath, sampleClaudeJsonl(), "utf8");
 
   const env = buildEnv(binDir, {
+    // os.homedir() reads USERPROFILE on Windows and HOME elsewhere.
     HOME: home,
+    USERPROFILE: home,
     OPENCODE_COMPANION_TRANSCRIPT_PATH: transcriptPath
   });
   const result = run("node", [SCRIPT, "transfer"], {
