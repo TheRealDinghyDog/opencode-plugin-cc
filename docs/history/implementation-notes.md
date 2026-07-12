@@ -1,5 +1,8 @@
 # Implementation Notes
 
+> [!NOTE]
+> **Historical document.** Mid-conversion working notes, frozen at the state they describe. Kept for provenance; the "Status" below refers to the early conversion phases, not the current release.
+
 ## Status: Phase 0 + Phase 1 complete and verified live
 
 ### Phase 0 — scaffold (done)

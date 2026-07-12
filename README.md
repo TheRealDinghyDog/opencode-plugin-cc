@@ -5,6 +5,9 @@ Use OpenCode from inside Claude Code for code reviews or to delegate tasks to Op
 This plugin is for Claude Code users who want an easy way to start using OpenCode from the workflow
 they already have.
 
+> [!NOTE]
+> This is an independent community project. It is not affiliated with or endorsed by the OpenCode project, Anthropic, or OpenAI.
+
 <video src="./docs/plugin-demo.webm" controls muted playsinline autoplay></video>
 
 ## What You Get
@@ -310,3 +313,7 @@ Yes. If you already use OpenCode, the plugin picks up the same [configuration](#
 Yes. Because the plugin uses your local OpenCode CLI, your existing sign-in method and config still apply.
 
 If you need to point a provider at a different endpoint, configure that in OpenCode and rerun `/opencode:setup`.
+
+## Acknowledgements and provenance
+
+This project began as a conversion of OpenAI's [codex-plugin-cc](https://github.com/openai/codex-plugin-cc) (Apache-2.0) — the Codex companion plugin for Claude Code — into an OpenCode companion. The plugin surface (commands, background jobs, session transfer) descends from that work; the OpenCode server integration, security model, and test contract were built for this project. The complete pre-conversion history is preserved in this repository; the fork point is tagged [`codex-fork-point`](../../releases/tag/codex-fork-point). See [NOTICE](NOTICE) for license attribution and [docs/history/](docs/history/) for the original conversion plan.

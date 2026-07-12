@@ -1,6 +1,7 @@
 {
-  "name": "@opencode/claude-code-plugin",
-  "version": "1.0.5",
+  "name": "opencode-plugin-cc",
+  "version": "1.0.0",
+  "author": "TheRealDinghyDog",
   "private": true,
   "files": [
     "plugins/opencode/"

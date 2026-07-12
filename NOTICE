@@ -1,4 +1,12 @@
-Copyright 2026 OpenAI
+opencode-plugin-cc
+Copyright 2026 TheRealDinghyDog
+
+This project is a derivative work of codex-plugin-cc
+(https://github.com/openai/codex-plugin-cc),
+Copyright 2026 OpenAI, licensed under the Apache License, Version 2.0.
+The original Codex integration was converted into an OpenCode integration;
+the pre-conversion history is preserved in this repository at the
+`codex-fork-point` tag.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

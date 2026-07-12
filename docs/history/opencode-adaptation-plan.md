@@ -1,5 +1,8 @@
 # Adapting `codex-plugin-cc` to OpenCode
 
+> [!NOTE]
+> **Historical document.** This is the original conversion plan written before implementation. It is kept for provenance and design context; parts of it were superseded during implementation (superseded sections are marked inline). It does not describe the current behavior — see the README and code for that.
+
 Analysis of the current Codex plugin and a concrete plan to build an **`opencode` plugin for Claude Code** that delegates work to OpenCode the same way this repo delegates to Codex — with `/opencode:rescue`, `/opencode:review`, etc.
 
 **Verdict up front:** The approach ports cleanly, and the OpenCode version is *architecturally simpler* than the Codex one. Both target characteristics are retainable:
