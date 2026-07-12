@@ -1,36 +1,38 @@
-# Codex plugin for Claude Code
+# OpenCode plugin for Claude Code
 
-Use Codex from inside Claude Code for code reviews or to delegate tasks to Codex.
+Use OpenCode from inside Claude Code for code reviews or to delegate tasks to OpenCode.
 
-This plugin is for Claude Code users who want an easy way to start using Codex from the workflow
+This plugin is for Claude Code users who want an easy way to start using OpenCode from the workflow
 they already have.
 
 <video src="./docs/plugin-demo.webm" controls muted playsinline autoplay></video>
 
 ## What You Get
 
-- `/codex:review` for a normal read-only Codex review
-- `/codex:adversarial-review` for a steerable challenge review
-- `/codex:rescue`, `/codex:transfer`, `/codex:status`, `/codex:result`, and `/codex:cancel` to delegate work, hand off sessions, and manage background jobs
+- `/opencode:review` for a normal read-only OpenCode review
+- `/opencode:adversarial-review` for a steerable challenge review
+- `/opencode:rescue`, `/opencode:transfer`, `/opencode:status`, `/opencode:result`, and `/opencode:cancel` to delegate work, hand off sessions, and manage background jobs
 
 ## Requirements
 
-- **ChatGPT subscription (incl. Free) or OpenAI API key.**
-  - Usage will contribute to your Codex usage limits. [Learn more](https://developers.openai.com/codex/pricing).
+- **A working local OpenCode install and provider configuration.**
+  - Usage is billed by whichever OpenCode provider/model you select.
 - **Node.js 18.18 or later**
+
+The plugin starts its own local `opencode serve` on demand, bound to `127.0.0.1` and protected with a per-server random password (HTTP Basic auth), so other local processes cannot reach its API. If you point the plugin at your own server via `OPENCODE_COMPANION_SERVER_URL` and that server is password-protected, also export `OPENCODE_SERVER_PASSWORD` (and `OPENCODE_SERVER_USERNAME` if you customized it).
 
 ## Install
 
 Add the marketplace in Claude Code:
 
 ```bash
-/plugin marketplace add openai/codex-plugin-cc
+/plugin marketplace add TheRealDinghyDog/opencode-plugin-cc
 ```
 
 Install the plugin:
 
 ```bash
-/plugin install codex@openai-codex
+/plugin install opencode@opencode
 ```
 
 Reload plugins:
@@ -42,41 +44,37 @@ Reload plugins:
 Then run:
 
 ```bash
-/codex:setup
+/opencode:setup
 ```
 
-`/codex:setup` will tell you whether Codex is ready. If Codex is missing and npm is available, it can offer to install Codex for you.
+`/opencode:setup` will tell you whether OpenCode is ready. If OpenCode is missing and npm is available, it can offer to install OpenCode for you.
 
-If you prefer to install Codex yourself, use:
+If you prefer to install OpenCode yourself, use:
 
 ```bash
-npm install -g @openai/codex
+npm install -g opencode-ai
 ```
 
-If Codex is installed but not logged in yet, run:
-
-```bash
-!codex login
-```
+If OpenCode is installed but no provider is configured yet, follow your OpenCode provider setup flow and rerun `/opencode:setup`.
 
 After install, you should see:
 
 - the slash commands listed below
-- the `codex:codex-rescue` subagent in `/agents`
+- the `opencode:opencode-rescue` subagent in `/agents`
 
 One simple first run is:
 
 ```bash
-/codex:review --background
-/codex:status
-/codex:result
+/opencode:review --background
+/opencode:status
+/opencode:result
 ```
 
 ## Usage
 
-### `/codex:review`
+### `/opencode:review`
 
-Runs a normal Codex review on your current work. It gives you the same quality of code review as running `/review` inside Codex directly.
+Runs a normal OpenCode review on your current work. It gives you the same quality of code review as running `/review` inside OpenCode directly.
 
 > [!NOTE]
 > Code review especially for multi-file changes might take a while. It's generally recommended to run it in the background.
@@ -86,26 +84,26 @@ Use it when you want:
 - a review of your current uncommitted changes
 - a review of your branch compared to a base branch like `main`
 
-Use `--base <ref>` for branch review. It also supports `--wait` and `--background`. It is not steerable and does not take custom focus text. Use [`/codex:adversarial-review`](#codexadversarial-review) when you want to challenge a specific decision or risk area.
+Use `--base <ref>` for branch review. It also supports `--wait` and `--background`. It is not steerable and does not take custom focus text. Use [`/opencode:adversarial-review`](#opencodeadversarial-review) when you want to challenge a specific decision or risk area.
 
 Examples:
 
 ```bash
-/codex:review
-/codex:review --base main
-/codex:review --background
+/opencode:review
+/opencode:review --base main
+/opencode:review --background
 ```
 
-This command is read-only and will not perform any changes. When run in the background you can use [`/codex:status`](#codexstatus) to check on the progress and [`/codex:cancel`](#codexcancel) to cancel the ongoing task.
+This command is read-only and will not perform any changes. When run in the background you can use [`/opencode:status`](#opencodestatus) to check on the progress and [`/opencode:cancel`](#opencodecancel) to cancel the ongoing task.
 
-### `/codex:adversarial-review`
+### `/opencode:adversarial-review`
 
 Runs a **steerable** review that questions the chosen implementation and design.
 
 It can be used to pressure-test assumptions, tradeoffs, failure modes, and whether a different approach would have been safer or simpler.
 
-It uses the same review target selection as `/codex:review`, including `--base <ref>` for branch review.
-It also supports `--wait` and `--background`. Unlike `/codex:review`, it can take extra focus text after the flags.
+It uses the same review target selection as `/opencode:review`, including `--base <ref>` for branch review.
+It also supports `--wait` and `--background`. Unlike `/opencode:review`, it can take extra focus text after the flags.
 
 Use it when you want:
 
@@ -116,76 +114,77 @@ Use it when you want:
 Examples:
 
 ```bash
-/codex:adversarial-review
-/codex:adversarial-review --base main challenge whether this was the right caching and retry design
-/codex:adversarial-review --background look for race conditions and question the chosen approach
+/opencode:adversarial-review
+/opencode:adversarial-review --base main challenge whether this was the right caching and retry design
+/opencode:adversarial-review --background look for race conditions and question the chosen approach
 ```
 
 This command is read-only. It does not fix code.
 
-### `/codex:rescue`
+### `/opencode:rescue`
 
-Hands a task to Codex through the `codex:codex-rescue` subagent.
+Hands a task to OpenCode through the `opencode:opencode-rescue` subagent.
 
-Use it when you want Codex to:
+Use it when you want OpenCode to:
 
 - investigate a bug
 - try a fix
-- continue a previous Codex task
+- continue a previous OpenCode task
 - take a faster or cheaper pass with a smaller model
 
 > [!NOTE]
 > Depending on the task and the model you choose these tasks might take a long time and it's generally recommended to force the task to be in the background or move the agent to the background.
+
+> [!IMPORTANT]
+> Rescue tasks default to a write-capable run using OpenCode's stock `build` agent under your own OpenCode permission configuration. Permission categories OpenCode gates behind an approval prompt (external-directory access, `.env` reads, doom-loop protection) are automatically **denied** in these headless runs — the plugin never approves a gated request on your behalf. Note that OpenCode permissions are approval-level controls, not an operating-system sandbox; run the OpenCode server in a container or as a restricted user if you need a hard filesystem boundary.
 
 It supports `--background`, `--wait`, `--resume`, and `--fresh`. If you omit `--resume` and `--fresh`, the plugin can offer to continue the latest rescue thread for this repo.
 
 Examples:
 
 ```bash
-/codex:rescue investigate why the tests started failing
-/codex:rescue fix the failing test with the smallest safe patch
-/codex:rescue --resume apply the top fix from the last run
-/codex:rescue --model gpt-5.4-mini --effort medium investigate the flaky integration test
-/codex:rescue --model spark fix the issue quickly
-/codex:rescue --background investigate the regression
+/opencode:rescue investigate why the tests started failing
+/opencode:rescue fix the failing test with the smallest safe patch
+/opencode:rescue --resume apply the top fix from the last run
+/opencode:rescue --model openai/gpt-5.4-mini --effort high investigate the flaky integration test
+/opencode:rescue --model spark fix the issue quickly
+/opencode:rescue --background investigate the regression
 ```
 
-You can also just ask for a task to be delegated to Codex:
+You can also just ask for a task to be delegated to OpenCode:
 
 ```text
-Ask Codex to redesign the database connection to be more resilient.
+Ask OpenCode to redesign the database connection to be more resilient.
 ```
 
 **Notes:**
 
-- if you do not pass `--model` or `--effort`, Codex chooses its own defaults.
-- if you say `spark`, the plugin maps that to `gpt-5.3-codex-spark`
-- follow-up rescue requests can continue the latest Codex task in the repo
+- if you do not pass `--model` or `--effort`, OpenCode chooses its own defaults.
+- if you say `spark`, the plugin maps that to `openai/gpt-5.3-codex-spark`
+- follow-up rescue requests can continue the latest OpenCode task in the repo
 
-### `/codex:transfer`
+### `/opencode:transfer`
 
-Creates a persistent Codex thread from the current Claude Code session and prints a `codex resume <session-id>` command.
-
-Use it when you started a debugging or implementation conversation in Claude Code and want to continue that same context directly in Codex.
+Transfer imports the current Claude Code JSONL transcript into a resumable OpenCode session with visible user and assistant turn history. Use it when you started a debugging or implementation conversation in Claude Code and want to continue that same context directly in OpenCode.
 
 Examples:
 
 ```bash
-/codex:transfer
-/codex:transfer --source ~/.claude/projects/-Users-me-repo/<session-id>.jsonl
+/opencode:transfer
+/opencode:transfer --source ~/.claude/projects/-Users-me-repo/<session-id>.jsonl
 ```
 
-The plugin's existing `SessionStart` hook supplies the current transcript path automatically; `--source` is available as a manual override. The transfer uses Codex's external-agent session importer, so it follows the same conversion rules as importing Claude history in the Codex App and creates visible turns that can be continued in the App or TUI. The source must be under `~/.claude/projects`, and older Codex versions that do not expose session import must be upgraded before using this command.
+The plugin's existing `SessionStart` hook supplies the current transcript path automatically; `--source` is available as a manual override.
 
-### `/codex:status`
+### `/opencode:status`
 
-Shows running and recent Codex jobs for the current repository.
+Shows running and recent OpenCode jobs for the current repository.
 
 Examples:
 
 ```bash
-/codex:status
-/codex:status task-abc123
+/opencode:status
+/opencode:status task-abc123
 ```
 
 Use it to:
@@ -194,127 +193,120 @@ Use it to:
 - see the latest completed job
 - confirm whether a task is still running
 
-### `/codex:result`
+### `/opencode:result`
 
-Shows the final stored Codex output for a finished job.
-When available, it also includes the Codex session ID so you can reopen that run directly in Codex with `codex resume <session-id>`.
-
-Examples:
-
-```bash
-/codex:result
-/codex:result task-abc123
-```
-
-### `/codex:cancel`
-
-Cancels an active background Codex job.
+Shows the final stored OpenCode output for a finished job.
+When available, it also includes the OpenCode session ID so you can reopen that run directly in OpenCode with `opencode --session <session-id>`.
 
 Examples:
 
 ```bash
-/codex:cancel
-/codex:cancel task-abc123
+/opencode:result
+/opencode:result task-abc123
 ```
 
-### `/codex:setup`
+### `/opencode:cancel`
 
-Checks whether Codex is installed and authenticated.
-If Codex is missing and npm is available, it can offer to install Codex for you.
+Cancels an active background OpenCode job.
 
-You can also use `/codex:setup` to manage the optional review gate.
+Examples:
+
+```bash
+/opencode:cancel
+/opencode:cancel task-abc123
+```
+
+### `/opencode:setup`
+
+Checks whether OpenCode is installed and authenticated.
+If OpenCode is missing and npm is available, it can offer to install OpenCode for you.
+
+You can also use `/opencode:setup` to manage the optional review gate.
 
 #### Enabling review gate
 
 ```bash
-/codex:setup --enable-review-gate
-/codex:setup --disable-review-gate
+/opencode:setup --enable-review-gate
+/opencode:setup --disable-review-gate
 ```
 
-When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted Codex review based on Claude's response. If that review finds issues, the stop is blocked so Claude can address them first.
+When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted OpenCode review based on Claude's response. If that review finds issues, the stop is blocked so Claude can address them first. The gate also blocks stopping when the OpenCode reviewer is unavailable; restore OpenCode and rerun `/opencode:setup`, or disable the gate with `/opencode:setup --disable-review-gate`.
 
 > [!WARNING]
-> The review gate can create a long-running Claude/Codex loop and may drain usage limits quickly. Only enable it when you plan to actively monitor the session.
+> The review gate can create a long-running Claude/OpenCode loop and may drain usage limits quickly. Only enable it when you plan to actively monitor the session.
 
 ## Typical Flows
 
 ### Review Before Shipping
 
 ```bash
-/codex:review
+/opencode:review
 ```
 
-### Hand A Problem To Codex
+### Hand A Problem To OpenCode
 
 ```bash
-/codex:rescue investigate why the build is failing in CI
+/opencode:rescue investigate why the build is failing in CI
 ```
 
 ### Start Something Long-Running
 
 ```bash
-/codex:adversarial-review --background
-/codex:rescue --background investigate the flaky test
+/opencode:adversarial-review --background
+/opencode:rescue --background investigate the flaky test
 ```
 
 Then check in with:
 
 ```bash
-/codex:status
-/codex:result
+/opencode:status
+/opencode:result
 ```
 
-## Codex Integration
+## OpenCode Integration
 
-The Codex plugin wraps the [Codex app server](https://developers.openai.com/codex/app-server). It uses the global `codex` binary installed in your environment and [applies the same configuration](https://developers.openai.com/codex/config-basic).
+The OpenCode plugin wraps a local `opencode serve` process. It uses the global `opencode` binary installed in your environment and OpenCode's normal provider/configuration state.
 
 ### Common Configurations
 
-If you want to change the default reasoning effort or the default model that gets used by the plugin, you can define that inside your user-level or project-level `config.toml`. For example to always use `gpt-5.4-mini` on `high` for a specific project you can add the following to a `.codex/config.toml` file at the root of the directory you started Claude in:
+If you want to change the default model used by the plugin, configure it in OpenCode. You can also pass a provider/model pair explicitly:
 
-```toml
-model = "gpt-5.4-mini"
-model_reasoning_effort = "high"
+```bash
+/opencode:rescue --model openai/gpt-5.4-mini --effort high investigate the flaky integration test
 ```
 
-Your configuration will be picked up based on:
+`--effort` is forwarded to OpenCode as the provider-specific message `variant`.
 
-- user-level config in `~/.codex/config.toml`
-- project-level overrides in `.codex/config.toml`
-- project-level overrides only load when the [project is trusted](https://developers.openai.com/codex/config-advanced#project-config-files-codexconfigtoml)
+### Moving The Work Over To OpenCode
 
-Check out the Codex docs for more [configuration options](https://developers.openai.com/codex/config-reference).
+Delegated tasks and any [stop gate](#what-does-the-review-gate-do) run can also be directly resumed inside OpenCode by running `opencode --session <session-id>` with the specific session ID you received from `/opencode:result` or `/opencode:status`, or by selecting it from the list.
 
-### Moving The Work Over To Codex
-
-Delegated tasks and any [stop gate](#what-does-the-review-gate-do) run can also be directly resumed inside Codex by running `codex resume` either with the specific session ID you received from running `/codex:result` or `/codex:status` or by selecting it from the list.
-
-This way you can review the Codex work or continue the work there.
+This way you can review the OpenCode work or continue the work there.
 
 ## FAQ
 
-### Do I need a separate Codex account for this plugin?
+### Do I need a separate OpenCode account for this plugin?
 
-If you are already signed into Codex on this machine, that account should work immediately here too. This plugin uses your local Codex CLI authentication.
+If you are already signed into OpenCode on this machine, that account should work immediately here too. This plugin uses your local OpenCode CLI authentication.
 
-If you only use Claude Code today and have not used Codex yet, you will also need to sign in to Codex with either a ChatGPT account or an API key. [Codex is available with your ChatGPT subscription](https://developers.openai.com/codex/pricing/), and [`codex login`](https://developers.openai.com/codex/cli/reference/#codex-login) supports both ChatGPT and API key sign-in. Run `/codex:setup` to check whether Codex is ready, and use `!codex login` if it is not.
+If you only use Claude Code today and have not used OpenCode yet, configure an OpenCode provider first. Run `/opencode:setup` to check whether OpenCode is ready.
 
-### Does the plugin use a separate Codex runtime?
+### Does the plugin use a separate OpenCode runtime?
 
-No. This plugin delegates through your local [Codex CLI](https://developers.openai.com/codex/cli/) and [Codex app server](https://developers.openai.com/codex/app-server/) on the same machine.
+No. This plugin delegates through your local OpenCode CLI and a headless `opencode serve` process on the same machine.
 
 That means:
 
-- it uses the same Codex install you would use directly
+- it uses the same OpenCode install you would use directly
 - it uses the same local authentication state
 - it uses the same repository checkout and machine-local environment
 
-### Will it use the same Codex config I already have?
+### Will it use the same OpenCode config I already have?
 
-Yes. If you already use Codex, the plugin picks up the same [configuration](#common-configurations).
+Yes. If you already use OpenCode, the plugin picks up the same [configuration](#common-configurations).
 
 ### Can I keep using my current API key or base URL setup?
 
-Yes. Because the plugin uses your local Codex CLI, your existing sign-in method and config still apply.
+Yes. Because the plugin uses your local OpenCode CLI, your existing sign-in method and config still apply.
 
-If you need to point the built-in OpenAI provider at a different endpoint, set `openai_base_url` in your [Codex config](https://developers.openai.com/codex/config-advanced/#config-and-state-locations).
+If you need to point a provider at a different endpoint, configure that in OpenCode and rerun `/opencode:setup`.
