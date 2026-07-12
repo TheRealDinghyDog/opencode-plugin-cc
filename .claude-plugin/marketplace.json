@@ -1,19 +1,19 @@
 {
   "name": "opencode",
   "owner": {
-    "name": "OpenCode"
+    "name": "TheRealDinghyDog"
   },
   "metadata": {
     "description": "OpenCode plugins to use in Claude Code for delegation and code review.",
-    "version": "1.0.5"
+    "version": "1.0.0"
   },
   "plugins": [
     {
       "name": "opencode",
       "description": "Use OpenCode from Claude Code to review code or delegate tasks.",
-      "version": "1.0.5",
+      "version": "1.0.0",
       "author": {
-        "name": "OpenCode"
+        "name": "TheRealDinghyDog"
       },
       "source": "./plugins/opencode"
     }

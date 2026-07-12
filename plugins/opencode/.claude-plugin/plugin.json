@@ -1,8 +1,11 @@
 {
   "name": "opencode",
-  "version": "1.0.5",
+  "version": "1.0.0",
   "description": "Use OpenCode from Claude Code to review code or delegate tasks.",
   "author": {
-    "name": "OpenCode"
-  }
+    "name": "TheRealDinghyDog"
+  },
+  "homepage": "https://github.com/TheRealDinghyDog/opencode-plugin-cc",
+  "repository": "https://github.com/TheRealDinghyDog/opencode-plugin-cc",
+  "license": "Apache-2.0"
 }
