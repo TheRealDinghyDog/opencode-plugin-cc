@@ -314,6 +314,10 @@ Yes. Because the plugin uses your local OpenCode CLI, your existing sign-in meth
 
 If you need to point a provider at a different endpoint, configure that in OpenCode and rerun `/opencode:setup`.
 
+## Privacy
+
+The plugin runs entirely locally and collects nothing. Your prompts and code go only to the AI providers you configured in your own OpenCode install. See [PRIVACY.md](PRIVACY.md) for details.
+
 ## Acknowledgements and provenance
 
 This project began as a conversion of OpenAI's [codex-plugin-cc](https://github.com/openai/codex-plugin-cc) (Apache-2.0) — the Codex companion plugin for Claude Code — into an OpenCode companion. The plugin surface (commands, background jobs, session transfer) descends from that work; the OpenCode server integration, security model, and test contract were built for this project. The complete pre-conversion history is preserved in this repository; the fork point is tagged [`codex-fork-point`](../../releases/tag/codex-fork-point). See [NOTICE](NOTICE) for license attribution and [docs/history/](docs/history/) for the original conversion plan.
