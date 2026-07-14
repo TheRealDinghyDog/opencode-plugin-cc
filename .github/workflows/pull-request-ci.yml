@@ -1,7 +1,12 @@
-name: Pull Request CI
+name: CI
 
 on:
   pull_request:
+  # pull_request runs test the PR head, not the merge commit that lands on
+  # main — and main is what the community-marketplace catalog pins. Test it
+  # directly on every push.
+  push:
+    branches: [main]
 
 permissions:
   contents: read
