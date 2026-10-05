@@ -396,6 +396,34 @@ test("stop review gate blocks when the enabled OpenCode reviewer is unavailable"
   });
 });
 
+test("stop review gate names the supported versions when OpenCode is an unsupported major", () => {
+  const workspace = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+  const env = buildTestEnv(binDir, {
+    CLAUDE_PLUGIN_DATA: pluginDataDir,
+    OPENCODE_COMPANION_SESSION_ID: "sess-current",
+    FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0"
+  });
+
+  return withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, () => {
+    saveState(workspace, { version: 1, config: { stopReviewGate: true }, jobs: [] });
+    const result = run(process.execPath, [STOP_HOOK], {
+      cwd: workspace,
+      env,
+      input: JSON.stringify({ cwd: workspace, session_id: env.OPENCODE_COMPANION_SESSION_ID })
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, "block");
+    assert.match(decision.reason, /OpenCode 3\.0\.0 is not supported yet: this plugin supports OpenCode 1\.x, and 2\.x/);
+    assert.match(decision.reason, /--disable-review-gate/);
+    assert.doesNotMatch(decision.reason, /ensure `opencode --version` works/);
+  });
+});
+
 test("stop review gate tears down a server left by a failed stop review task", { skip: LOCAL_LISTEN_SKIP }, async () => {
   const workspace = makeTempDir();
   const binDir = makeTempDir();
