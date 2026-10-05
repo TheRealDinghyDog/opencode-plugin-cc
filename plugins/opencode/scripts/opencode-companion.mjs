@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
 import {
+  availabilityErrorMessage,
   buildPersistentTaskThreadName,
   DEFAULT_CONTINUE_PROMPT,
   findLatestTaskThread,
@@ -186,7 +187,9 @@ async function buildSetupReport(cwd, actionsTaken = []) {
 
   const nextSteps = [];
   if (!opencodeStatus.available) {
-    nextSteps.push("Install OpenCode and ensure `opencode --version` works.");
+    nextSteps.push(
+      opencodeStatus.unsupported ? opencodeStatus.detail : "Install OpenCode and ensure `opencode --version` works."
+    );
   }
   if (opencodeStatus.available && !authStatus.loggedIn) {
     nextSteps.push("Configure an OpenCode provider, then rerun `/opencode:setup`.");
@@ -252,7 +255,7 @@ function buildReviewPrompt(context, focusText, { templateName, reviewKind }) {
 function ensureOpenCodeAvailable(cwd) {
   const availability = getAvailability(cwd);
   if (!availability.available) {
-    throw new Error("OpenCode CLI is not installed or is missing headless server support. Install OpenCode, then rerun `/opencode:setup`.");
+    throw new Error(availabilityErrorMessage(availability));
   }
 }
 
@@ -437,6 +440,7 @@ async function executeTaskRun(request) {
     {
       rawOutput,
       failureMessage,
+      failed: result.status !== 0,
       reasoningSummary: result.reasoningSummary
     },
     {

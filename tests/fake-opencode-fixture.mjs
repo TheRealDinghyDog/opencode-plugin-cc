@@ -230,6 +230,27 @@ async function handleMessage(req, res, sessionID) {
   saveState(state);
 
   const agent = session.agent || body.agent || "build";
+  // A real server streams the user's prompt as its own message and text part
+  // before the assistant turn starts. FAKE_OPENCODE_USER_PART_FIRST sends the
+  // part before the message that reveals its user role.
+  const userMessageID = messageID + "_user";
+  const userInfo = {
+    id: userMessageID,
+    sessionID,
+    role: "user",
+    time: { created: Date.now() },
+    agent,
+    model: { providerID: "fake", modelID: "fake-model" }
+  };
+  const userPart = { id: "prt_" + userMessageID, sessionID, messageID: userMessageID, type: "text", text: prompt };
+  if (process.env.FAKE_OPENCODE_USER_PART_FIRST === "1") {
+    emit("message.part.updated", { sessionID, part: userPart, time: Date.now() });
+    emit("message.updated", { sessionID, info: userInfo });
+  } else {
+    emit("message.updated", { sessionID, info: userInfo });
+    emit("message.part.updated", { sessionID, part: userPart, time: Date.now() });
+  }
+
   const info = assistantInfo(sessionID, messageID, agent);
   emit("message.updated", { sessionID, info });
   emit("session.next.step.started", {
@@ -239,6 +260,32 @@ async function handleMessage(req, res, sessionID) {
     agent,
     model: { providerID: "fake", modelID: "fake-model" }
   });
+
+  // The provider rejects the request: session.error, then idle, with no
+  // assistant text ("provider-error") or after partial text
+  // ("provider-error-after-text"), like a real 1.18 server.
+  const providerFailMode = process.env.FAKE_OPENCODE_MESSAGE_FAIL;
+  if (providerFailMode === "provider-error" || providerFailMode === "provider-error-after-text") {
+    if (providerFailMode === "provider-error-after-text") {
+      emit("message.part.updated", {
+        sessionID,
+        part: {
+          id: "prt_" + messageID + "_partial",
+          sessionID,
+          messageID,
+          type: "text",
+          text: "Partial answer before the failure.",
+          time: { start: Date.now(), end: Date.now() }
+        },
+        time: Date.now()
+      });
+    }
+    const error = { name: "APIError", data: { message: "Bad Request: fake-model is not supported for this account." } };
+    emit("session.error", { sessionID, error });
+    emit("session.idle", { sessionID });
+    sendJson(res, { info: Object.assign({}, info, { error }), parts: [] });
+    return;
+  }
 
   if (agent === "build") {
     // Workspace edits are covered by the stock build agent's wildcard allow
@@ -437,7 +484,7 @@ function handleImportCli(filePath) {
 
 const args = process.argv.slice(2);
 if (args[0] === "--version") {
-  console.log("opencode 1.17.10-test");
+  console.log(process.env.FAKE_OPENCODE_VERSION_OUTPUT || "opencode 1.17.10-test");
   process.exit(0);
 }
 if (args[0] === "serve" && args.includes("--help")) {
@@ -492,7 +539,7 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, { ok: false }, 503);
       return;
     }
-    sendJson(res, { ok: true });
+    sendJson(res, { healthy: true, version: process.env.FAKE_OPENCODE_SERVER_VERSION || "1.17.15" });
     return;
   }
 

@@ -10,7 +10,11 @@ Run:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" setup --json $ARGUMENTS
 ```
 
-If the result says OpenCode is unavailable and npm is available:
+If the result says the installed OpenCode version is unsupported (`opencode.unsupported` is true):
+- Do not offer to install OpenCode; an npm install can collide with the existing `opencode` binary.
+- Present the setup output's guidance for switching to a supported OpenCode version.
+
+If the result says OpenCode is unavailable (and not unsupported) and npm is available:
 - Use `AskUserQuestion` exactly once to ask whether Claude should install OpenCode now.
 - Put the install option first and suffix it with `(Recommended)`.
 - Use these two options:

@@ -4,7 +4,11 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildBasicAuthHeader, OpencodeServerClient } from "../plugins/opencode/scripts/lib/opencode-server.mjs";
+import {
+  buildBasicAuthHeader,
+  OpencodeServerClient,
+  parseOpencodeVersionInfo
+} from "../plugins/opencode/scripts/lib/opencode-server.mjs";
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {
@@ -54,7 +58,8 @@ test("client scopes project routes to the configured directory but never /global
           headers: { "content-type": "text/event-stream" }
         });
       }
-      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      const body = url.pathname === "/global/health" ? '{"healthy":true,"version":"1.17.15"}' : "{}";
+      return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
     }
   });
 
@@ -87,7 +92,7 @@ test("client sends Basic auth on requests, fresh connections, and the event stre
       return;
     }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end("{}");
+    res.end(req.url === "/global/health" ? '{"healthy":true,"version":"1.17.15"}' : "{}");
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const client = new OpencodeServerClient(`http://127.0.0.1:${server.address().port}`, { password: "secret" });
@@ -230,4 +235,35 @@ test("fresh-connection requests reject when the response aborts mid-body", async
   } finally {
     restore();
   }
+});
+
+function healthClient(body, contentType = "application/json") {
+  return new OpencodeServerClient("http://opencode.test", {
+    fetch: async () => new Response(body, { status: 200, headers: { "content-type": contentType } })
+  });
+}
+
+test("health accepts an OpenCode 1.x health response", async () => {
+  const body = await healthClient('{"healthy":true,"version":"1.18.34"}').health();
+  assert.deepEqual(body, { healthy: true, version: "1.18.34" });
+});
+
+test("health rejects the HTML an OpenCode 2.x server serves on the retired route", async () => {
+  await assert.rejects(
+    healthClient("<!doctype html><title>OpenCode</title>", "text/html").health(),
+    /did not return an OpenCode 1\.x health response/
+  );
+});
+
+test("health rejects a server that reports an unsupported major version", async () => {
+  await assert.rejects(
+    healthClient('{"healthy":true,"version":"2.0.20"}').health(),
+    /OpenCode 2\.0\.20 is not supported yet/
+  );
+});
+
+test("parseOpencodeVersionInfo reads both 1.x and 2.x --version output", () => {
+  assert.deepEqual(parseOpencodeVersionInfo("1.18.34"), { version: "1.18.34", major: 1 });
+  assert.deepEqual(parseOpencodeVersionInfo("opencode v2.0.20"), { version: "2.0.20", major: 2 });
+  assert.equal(parseOpencodeVersionInfo("not a version"), null);
 });

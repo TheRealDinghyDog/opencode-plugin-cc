@@ -38,7 +38,7 @@ test(
   const server = http.createServer((req, res) => {
     if (req.method === "GET" && req.url === "/global/health") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
+      res.end(JSON.stringify({ healthy: true, version: "1.17.15" }));
       return;
     }
     res.writeHead(404);
@@ -74,7 +74,7 @@ test(
       authorizedRequests += 1;
       if (req.method === "GET" && req.url === "/global/health") {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true }));
+        res.end(JSON.stringify({ healthy: true, version: "1.17.15" }));
         return;
       }
       res.writeHead(404);
@@ -119,7 +119,7 @@ test("ensureServer keeps a single lease for repeated calls from the same process
   process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
   globalThis.fetch = async (requestUrl) => {
     assert.equal(String(requestUrl), `${url}/global/health`);
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ healthy: true, version: "1.17.15" }), {
       status: 200,
       headers: { "content-type": "application/json" }
     });
@@ -383,7 +383,7 @@ test("ensureServer rejects when its bounded server lock acquisition times out", 
     "utf8"
   );
   globalThis.fetch = async () =>
-    new Response(JSON.stringify({ ok: true }), {
+    new Response(JSON.stringify({ healthy: true, version: "1.17.15" }), {
       status: 200,
       headers: { "content-type": "application/json" }
     });
@@ -715,3 +715,26 @@ test("saveServerSession preserves the existing session when its atomic rename fa
     }
   }
 });
+
+test(
+  "ensureServer rejects an external OpenCode 2.x server that serves its web UI on the health route",
+  { skip: LOCAL_LISTEN_AVAILABLE ? false : "local 127.0.0.1 listen is unavailable in this sandbox" },
+  async () => {
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end("<!doctype html><title>OpenCode</title>");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${server.address().port}`;
+    const workspace = makeTempDir();
+
+    try {
+      await assert.rejects(
+        () => ensureServer(workspace, { env: { OPENCODE_COMPANION_SERVER_URL: url } }),
+        /Configured OpenCode server is not healthy: .*did not return an OpenCode 1\.x health response/
+      );
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+);

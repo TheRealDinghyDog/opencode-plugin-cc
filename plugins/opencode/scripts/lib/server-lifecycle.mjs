@@ -407,7 +407,8 @@ export async function ensureServer(cwd, options = {}) {
             : `Configured OpenCode server requires authentication: ${overrideUrl}. Export ${SERVER_PASSWORD_ENV} (and ${SERVER_USERNAME_ENV} unless it is "opencode") so the plugin can connect.`
         );
       }
-      throw new Error(`Configured OpenCode server is not healthy: ${overrideUrl}`);
+      const reason = error instanceof Error && error.message ? ` (${error.message})` : "";
+      throw new Error(`Configured OpenCode server is not healthy: ${overrideUrl}${reason}`);
     }
     return {
       url: overrideUrl,

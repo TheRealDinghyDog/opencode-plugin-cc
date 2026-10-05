@@ -18,8 +18,9 @@ they already have.
 
 ## Requirements
 
-- **A working local OpenCode install and provider configuration.**
+- **A working local OpenCode 1.x install and provider configuration.**
   - Usage is billed by whichever OpenCode provider/model you select.
+  - OpenCode 2.x is not supported yet: it replaced the server API this plugin uses. `npm install -g opencode-ai`, the `opencode.ai/install` script, and OpenCode's Homebrew tap (`brew install anomalyco/tap/opencode`) install the 1.x line. The core Homebrew formula (`brew install opencode`) installs 2.x; `/opencode:setup` reports it as unsupported.
 - **Node.js 18.18 or later**
 
 The plugin starts its own local `opencode serve` on demand, bound to `127.0.0.1` and protected with a per-server random password (HTTP Basic auth), so other local processes cannot reach its API. If you point the plugin at your own server via `OPENCODE_COMPANION_SERVER_URL` and that server is password-protected, also export `OPENCODE_SERVER_PASSWORD` (and `OPENCODE_SERVER_USERNAME` if you customized it).
