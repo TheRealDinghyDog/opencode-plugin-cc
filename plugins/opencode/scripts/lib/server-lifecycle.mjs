@@ -7,7 +7,12 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 
 import { lockIsStale, readLockOwner, releaseLock, stealStaleLock, tryCreateLock } from "./lock-dir.mjs";
-import { OpencodeServerClient } from "./opencode-server.mjs";
+import {
+  OpencodeServerClient,
+  isSupportedOpencodeMajor,
+  unsupportedOpencodeVersionError
+} from "./opencode-server.mjs";
+import { OpencodeV2Client } from "./opencode-server-v2.mjs";
 import {
   commandLineLooksLikeOpencodeServe,
   findListeningPid,
@@ -102,30 +107,63 @@ async function withTimeout(fn, timeoutMs) {
   }
 }
 
-export async function isServerHealthy(url, timeoutMs = 500, credentials = {}) {
+// Which server API a running server speaks: 1.x answers /global/health with
+// JSON, 2.x serves its web UI there and reports itself on /api/info. Throws
+// when neither answers, keeping the 1.x error unless /api/info rejected the
+// credentials or named an unsupported version.
+async function probeServerApi(url, credentials, signal) {
+  let v1Error;
+  try {
+    await new OpencodeServerClient(url, credentials).health({ signal });
+    return 1;
+  } catch (error) {
+    if (error?.status === 401 || error?.code === "OPENCODE_UNSUPPORTED_VERSION") {
+      throw error;
+    }
+    v1Error = error;
+  }
+  try {
+    await new OpencodeV2Client(url, credentials).health({ signal });
+    return 2;
+  } catch (error) {
+    // 2.x serves its retired 1.x routes without auth, so a missing or wrong
+    // password only shows up here.
+    throw error?.status === 401 || error?.code === "OPENCODE_UNSUPPORTED_VERSION" ? error : v1Error;
+  }
+}
+
+export async function detectServerApi(url, timeoutMs = 500, credentials = {}) {
   const normalized = normalizeUrl(url);
   if (!normalized) {
-    return false;
+    return null;
   }
-
   try {
-    const client = new OpencodeServerClient(normalized, credentials);
-    await withTimeout((signal) => client.health({ signal }), timeoutMs);
-    return true;
+    return await withTimeout((signal) => probeServerApi(normalized, credentials, signal), timeoutMs);
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function isServerHealthy(url, timeoutMs = 500, credentials = {}) {
+  return (await detectServerApi(url, timeoutMs, credentials)) !== null;
 }
 
 async function waitForServerHealth(url, timeoutMs = 10000, credentials = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await isServerHealthy(url, 500, credentials)) {
-      return true;
+    const api = await detectServerApi(url, 500, credentials);
+    if (api !== null) {
+      return api;
     }
     await sleep(100);
   }
-  return false;
+  return null;
+}
+
+function assertSupportedServerApi(api, env) {
+  if (!isSupportedOpencodeMajor(api, env)) {
+    throw unsupportedOpencodeVersionError(`${api}.x`);
+  }
 }
 
 function processIsAlive(pid) {
@@ -143,10 +181,12 @@ function processIsAlive(pid) {
 
 async function loadHealthyServerSession(cwd, healthTimeoutMs) {
   const existing = loadServerSession(cwd);
-  if (existing?.url && (await isServerHealthy(existing.url, healthTimeoutMs, serverSessionCredentials(existing)))) {
-    return existing;
+  if (!existing?.url) {
+    return null;
   }
-  return null;
+  // Records written before 2.x support carry no `api`; the probe fills it in.
+  const api = await detectServerApi(existing.url, healthTimeoutMs, serverSessionCredentials(existing));
+  return api === null ? null : { ...existing, api };
 }
 
 function createServerLease(options = {}) {
@@ -319,9 +359,13 @@ export async function ensureServer(cwd, options = {}) {
       password: envSource[SERVER_PASSWORD_ENV] || null,
       username: envSource[SERVER_USERNAME_ENV] || undefined
     };
+    let api;
     try {
-      const client = new OpencodeServerClient(overrideUrl, credentials);
-      await withTimeout((signal) => client.health({ signal }), options.healthTimeoutMs ?? 1000);
+      api = await withTimeout(
+        (signal) => probeServerApi(overrideUrl, credentials, signal),
+        options.healthTimeoutMs ?? 1000
+      );
+      assertSupportedServerApi(api, envSource);
     } catch (error) {
       if (error?.status === 401) {
         throw new Error(
@@ -337,6 +381,7 @@ export async function ensureServer(cwd, options = {}) {
       url: overrideUrl,
       pid: null,
       external: true,
+      api,
       password: credentials.password,
       username: credentials.username ?? null
     };
@@ -349,7 +394,7 @@ export async function ensureServer(cwd, options = {}) {
 
   try {
     const lockedExisting = await loadHealthyServerSession(cwd, options.healthTimeoutMs ?? 500);
-    if (lockedExisting) {
+    if (lockedExisting && isSupportedOpencodeMajor(lockedExisting.api, options.env ?? process.env)) {
       const leasedExisting = addServerLease(lockedExisting, options);
       saveServerSession(cwd, leasedExisting);
       return leasedExisting;
@@ -357,7 +402,7 @@ export async function ensureServer(cwd, options = {}) {
 
     const staleExisting = loadServerSession(cwd);
     if (staleExisting) {
-      const { url, pidFile, logFile, sessionDir, pid, external, password, username, port } = staleExisting;
+      const { url, pidFile, logFile, sessionDir, pid, external, password, username, port, api } = staleExisting;
       // The server lock is already held here; intentionally omit cwd so teardown
       // uses the unlocked path even if the persisted session schema grows.
       await teardownServerSession({
@@ -370,6 +415,7 @@ export async function ensureServer(cwd, options = {}) {
         password,
         username,
         port,
+        api,
         killProcess: options.killProcess ?? null,
         readProcessCommandLineImpl: options.readProcessCommandLineImpl ?? null
       });
@@ -394,7 +440,7 @@ export async function ensureServer(cwd, options = {}) {
       env: options.env ?? process.env,
       password
     });
-    const ready = await waitForServerHealth(url, options.timeoutMs ?? 10000, {
+    const api = await waitForServerHealth(url, options.timeoutMs ?? 10000, {
       password,
       username: OWNED_SERVER_USERNAME
     });
@@ -402,7 +448,7 @@ export async function ensureServer(cwd, options = {}) {
     // the child is the shell, and under Git Bash that shell is gone once the
     // server runs. Record the process listening on the port instead: teardown
     // verifies and stops that one (issue #65).
-    const serverPid = (ready ? findListeningPid(port, options) : null) ?? child.pid ?? null;
+    const serverPid = (api !== null ? findListeningPid(port, options) : null) ?? child.pid ?? null;
     if (pidFile && serverPid && serverPid !== child.pid) {
       fs.writeFileSync(pidFile, `${serverPid}\n`, "utf8");
     }
@@ -410,7 +456,8 @@ export async function ensureServer(cwd, options = {}) {
     // identity-mismatch teardown skip is investigated); verification itself
     // matches the LIVE command line against `opencode serve --port <port>`.
     const pidCommandLine = readProcessCommandLine(serverPid, options);
-
+    // A server the plugin cannot drive is torn down like one that never came up.
+    const ready = api !== null && isSupportedOpencodeMajor(api, options.env ?? process.env);
     if (!ready) {
       await teardownServerSession({
         url,
@@ -421,9 +468,13 @@ export async function ensureServer(cwd, options = {}) {
         password,
         username: OWNED_SERVER_USERNAME,
         port,
+        api,
         killProcess: options.killProcess ?? null,
         readProcessCommandLineImpl: options.readProcessCommandLineImpl ?? null
       });
+      if (api !== null) {
+        throw unsupportedOpencodeVersionError(`${api}.x`);
+      }
       return null;
     }
 
@@ -435,6 +486,7 @@ export async function ensureServer(cwd, options = {}) {
       logFile,
       sessionDir,
       external: false,
+      api,
       password,
       username: OWNED_SERVER_USERNAME,
       port,
@@ -490,9 +542,11 @@ async function teardownServerSessionUnlocked({
   username = null,
   killProcess = null,
   port = null,
+  api = null,
   readProcessCommandLineImpl = null
 } = {}) {
-  if (url && !external) {
+  // 2.x has no /global routes; its teardown is the PID kill alone.
+  if (url && !external && api !== 2) {
     try {
       const client = new OpencodeServerClient(url, { password, username: username ?? undefined });
       // Dispose only cleans up instance state; on 1.17.15 it does NOT stop the
@@ -565,6 +619,7 @@ export async function teardownServerSession({
   username = null,
   killProcess = null,
   port = null,
+  api = null,
   readProcessCommandLineImpl = null
 } = {}) {
   if (!cwd) {
@@ -579,6 +634,7 @@ export async function teardownServerSession({
       username,
       killProcess,
       port,
+      api,
       readProcessCommandLineImpl
     });
   }
@@ -616,6 +672,7 @@ export async function teardownServerSession({
       username: session?.username ?? username,
       killProcess,
       port: session?.port ?? port,
+      api: session?.api ?? api,
       readProcessCommandLineImpl
     };
     const result = await teardownServerSessionUnlocked(teardownTarget);

@@ -13,9 +13,20 @@ export class OpencodeHttpError extends Error {
   }
 }
 
-// The plugin drives OpenCode's 1.x server API. OpenCode 2.x replaced it with a
-// new /api/* surface, and its retired 1.x routes fall through to the web UI.
+// The plugin drives OpenCode's 1.x server API, and 2.x's new /api/* surface
+// through a separate client. 2.x support stays off until it is complete
+// (issue #46); OPENCODE_COMPANION_EXPERIMENTAL_V2=1 turns it on for
+// development. Every "is this major usable?" decision goes through here.
 export const SUPPORTED_OPENCODE_MAJOR = 1;
+export const EXPERIMENTAL_V2_ENV = "OPENCODE_COMPANION_EXPERIMENTAL_V2";
+
+export function opencodeV2Enabled(env = process.env) {
+  return env?.[EXPERIMENTAL_V2_ENV] === "1";
+}
+
+export function isSupportedOpencodeMajor(major, env = process.env) {
+  return major === SUPPORTED_OPENCODE_MAJOR || (major === 2 && opencodeV2Enabled(env));
+}
 
 // `opencode --version` prints "1.18.34" on 1.x and "opencode v2.0.20" on 2.x;
 // the /global/health body carries the bare version.
@@ -30,6 +41,12 @@ export function unsupportedOpencodeVersionMessage(version) {
     "Install the OpenCode 1.x line (`npm install -g opencode-ai`, or OpenCode's Homebrew tap " +
     "`anomalyco/tap/opencode` after uninstalling the core `opencode` formula), then rerun `/opencode:setup`."
   );
+}
+
+export function unsupportedOpencodeVersionError(version) {
+  const error = new Error(unsupportedOpencodeVersionMessage(version));
+  error.code = "OPENCODE_UNSUPPORTED_VERSION";
+  return error;
 }
 
 function trimBaseUrl(url) {
@@ -50,7 +67,7 @@ export function buildBasicAuthHeader(credentials = {}) {
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
-function encodePathSegment(value) {
+export function encodePathSegment(value) {
   return encodeURIComponent(String(value));
 }
 
@@ -75,7 +92,7 @@ function parseBodyText(text, contentType = "") {
   }
 }
 
-function requestWithFreshConnection(url, options = {}) {
+export function requestWithFreshConnection(url, options = {}) {
   const transport = url.protocol === "https:" ? https : http;
   const body = options.body == null ? null : JSON.stringify(options.body);
   const requestTimeoutMs = Math.max(
@@ -387,7 +404,7 @@ export class OpencodeServerClient {
     }
     const versionInfo = parseOpencodeVersionInfo(body.version);
     if (versionInfo && versionInfo.major > SUPPORTED_OPENCODE_MAJOR) {
-      throw new Error(unsupportedOpencodeVersionMessage(versionInfo.version));
+      throw unsupportedOpencodeVersionError(versionInfo.version);
     }
     return body;
   }
@@ -421,42 +438,47 @@ export class OpencodeServerClient {
       throw new Error("OpenCode event stream did not include a response body.");
     }
 
-    let reader;
-    try {
-      options.onOpen?.();
-      reader = response.body.getReader();
-    } catch (error) {
-      if (reader) {
-        await reader.cancel().catch(() => {});
-        try {
-          reader.releaseLock();
-        } catch {
-          // Preserve the original onOpen/getReader failure.
-        }
-      } else {
-        await response.body.cancel().catch(() => {});
-      }
-      throw error;
-    }
-    const decoder = new TextDecoder();
-    let buffer = "";
+    return consumeEventStream(response, onEvent, options);
+  }
+}
 
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        buffer += decoder.decode(value, { stream: true });
-        buffer = await dispatchSseBlocks(buffer, onEvent);
+// Shared by the 1.x and 2.x clients: both servers stream `data:` blocks.
+export async function consumeEventStream(response, onEvent, options = {}) {
+  let reader;
+  try {
+    options.onOpen?.();
+    reader = response.body.getReader();
+  } catch (error) {
+    if (reader) {
+      await reader.cancel().catch(() => {});
+      try {
+        reader.releaseLock();
+      } catch {
+        // Preserve the original onOpen/getReader failure.
       }
-
-      buffer += decoder.decode();
-      if (buffer.trim()) {
-        await dispatchSseBlocks(`${buffer}\n\n`, onEvent);
-      }
-    } finally {
-      reader.releaseLock();
+    } else {
+      await response.body.cancel().catch(() => {});
     }
+    throw error;
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      buffer = await dispatchSseBlocks(buffer, onEvent);
+    }
+
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      await dispatchSseBlocks(`${buffer}\n\n`, onEvent);
+    }
+  } finally {
+    reader.releaseLock();
   }
 }

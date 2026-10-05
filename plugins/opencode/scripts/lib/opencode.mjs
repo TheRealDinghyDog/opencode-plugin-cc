@@ -6,10 +6,11 @@ import { createTempDir, readJsonFile, writeJsonFile } from "./fs.mjs";
 import {
   OpencodeHttpError,
   OpencodeServerClient,
-  SUPPORTED_OPENCODE_MAJOR,
+  isSupportedOpencodeMajor,
   parseOpencodeVersionInfo,
   unsupportedOpencodeVersionMessage
 } from "./opencode-server.mjs";
+import { OPENCODE_V2_MAJOR, OpencodeV2Client } from "./opencode-server-v2.mjs";
 import {
   SERVER_PASSWORD_ENV,
   SERVER_URL_ENV,
@@ -1129,8 +1130,10 @@ function canonicalWorkspaceDirectory(cwd) {
   }
 }
 
+// ensureServer records which API the server speaks; legacy records are 1.x.
 function buildServerClient(cwd, server) {
-  return new OpencodeServerClient(server.url, {
+  const Client = server.api === OPENCODE_V2_MAJOR ? OpencodeV2Client : OpencodeServerClient;
+  return new Client(server.url, {
     ...serverSessionCredentials(server),
     directory: canonicalWorkspaceDirectory(cwd)
   });
@@ -1237,7 +1240,7 @@ export function getAvailability(cwd, env = process.env) {
   // user-managed external server is checked by its own health response
   // instead, since turns never touch the local binary's server API.
   const versionInfo = parseOpencodeVersionInfo(versionStatus.detail);
-  if (versionInfo && versionInfo.major > SUPPORTED_OPENCODE_MAJOR && !env?.[SERVER_URL_ENV]) {
+  if (versionInfo && !isSupportedOpencodeMajor(versionInfo.major, env) && !env?.[SERVER_URL_ENV]) {
     return {
       available: false,
       unsupported: true,
@@ -1629,7 +1632,7 @@ export async function importExternalAgentSession(cwd, options = {}) {
   const versionOutput = versionResult.stdout || versionResult.stderr;
   // OpenCode 2.x moved `opencode import` and changed the session format.
   const versionInfo = parseOpencodeVersionInfo(versionOutput);
-  if (versionInfo && versionInfo.major > SUPPORTED_OPENCODE_MAJOR) {
+  if (versionInfo && !isSupportedOpencodeMajor(versionInfo.major, options.env ?? process.env)) {
     throw new Error(unsupportedOpencodeVersionMessage(versionInfo.version));
   }
   const version = parseOpenCodeVersion(versionOutput);
