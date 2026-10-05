@@ -32,10 +32,24 @@ export function resolveTurnTimeoutMs(options = {}) {
 // - 5xx, 408 and 429 are transient: keep polling.
 export const DEFAULT_SERVER_GONE_MS = 120_000;
 
+// OpenCode 1.18 can't list the messages of a session that received a
+// json_schema prompt: it stores the format with `retryCount` added and then
+// rejects its own stored format (HTTP 400 "Expected OutputFormatJsonSchema",
+// issue #92). That never recovers, so there is nothing to wait for.
+function isUnlistableSessionError(error) {
+  return error?.status === 400 && /OutputFormatJsonSchema/.test(`${error.body ?? ""} ${error.message ?? ""}`);
+}
+
 export function recoveryWatch(options = {}) {
   const windowMs = Number(options.serverGoneMs) > 0 ? Number(options.serverGoneMs) : DEFAULT_SERVER_GONE_MS;
   let since = null;
   return (error, sessionID) => {
+    if (isUnlistableSessionError(error)) {
+      return new Error(
+        "Can no longer observe this turn: OpenCode can't list the messages of a session that ran a structured review " +
+          `(a known OpenCode 1.x bug). It may still be running; open it with \`opencode --session ${sessionID}\`.`
+      );
+    }
     const status = typeof error?.status === "number" ? error.status : null;
     const hopeless = Boolean(error) && (status === null || (status >= 400 && status < 500 && status !== 408 && status !== 429));
     if (!hopeless) {

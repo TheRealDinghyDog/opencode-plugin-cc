@@ -127,6 +127,42 @@ test("a 1.x turn whose recovery is rejected for good says it may still be runnin
   assert.match(state.error?.message ?? "", /^Can no longer observe this turn: .*HTTP 400.*opencode --session ses_rejected/);
 });
 
+// Issue #92: OpenCode 1.18 can't list a session's messages once it ran a
+// structured review. That 400 never recovers, so once the held-open response
+// is gone too, stop at once and name the cause.
+const unlistable = () =>
+  new OpencodeHttpError("OpenCode GET /session/ses_review/message failed with HTTP 400.", {
+    status: 400,
+    body: '{"name":"BadRequest","data":{"message":"Expected OutputFormatJsonSchema, got {\\"type\\":\\"json_schema\\",\\"retryCount\\":2}"}}'
+  });
+
+test("a 1.x review whose session can't be listed (#92) stops at once and names the cause", async () => {
+  const startedAt = Date.now();
+  const state = await captureTurnForTest(droppedV1Client(unlistable), "ses_review", failedResponse, {
+    ...FAST,
+    serverGoneMs: 60_000
+  });
+  assert.match(state.error?.message ?? "", /can't list the messages of a session that ran a structured review.*opencode --session ses_review/);
+  assert.ok(Date.now() - startedAt < 5000, "a known-permanent error needs no waiting window");
+});
+
+test("while the 1.x held-open response is still open, rejected recovery doesn't end the turn", async () => {
+  const delivered = () =>
+    new Promise((resolve) =>
+      setTimeout(
+        () =>
+          resolve({
+            info: { id: "msg_answer", role: "assistant", sessionID: "ses_review" },
+            parts: [{ id: "prt_answer", sessionID: "ses_review", messageID: "msg_answer", type: "text", text: "Delivered by the response." }]
+          }),
+        1000
+      )
+    );
+  const state = await captureTurnForTest(droppedV1Client(unlistable), "ses_review", delivered, FAST);
+  assert.equal(state.error ?? null, null);
+  assert.equal(state.finalMessage, "Delivered by the response.");
+});
+
 // 1.x with text already streamed, then both the event stream and the held-open
 // response gone: only the finished message on the server can end the turn. On
 // 1.18 a turn stores one assistant message per step; the turn is done when the

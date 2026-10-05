@@ -1100,13 +1100,19 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
         // can still complete the turn. Once that response is gone too (it fails
         // on long turns), only the finished message on the server can (#87).
         const lacking = !state.error && !state.finalMessage && state.structuredOutput == null;
-        if (lacking || responseSettled) {
+        // A response that arrived completes the turn after its short grace;
+        // only a failed one leaves recovery as the way to finish.
+        const responseFailed = responseSettled && state.responseError != null;
+        if (lacking || responseFailed) {
           state.recoveryError = null;
           await recoverFinalMessageFromServer(client, state, {
             recoveryTimeoutMs: options.recoveryTimeoutMs,
             requireFinished: !lacking
           });
-          const stop = state.completed ? null : watch(state.recoveryError, state.sessionID);
+          // While the held-open response is still open it can deliver the
+          // finished message itself, even when listing messages can't (#92):
+          // only judge recovery once it has failed.
+          const stop = state.completed || !responseFailed ? null : watch(state.recoveryError, state.sessionID);
           if (stop) {
             state.error = stop;
             emitProgress(state.onProgress, stop.message, "failed");
