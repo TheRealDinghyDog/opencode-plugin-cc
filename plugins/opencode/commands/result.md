@@ -2,7 +2,7 @@
 description: Show the stored final output for a finished OpenCode job in this repository
 argument-hint: '[job-id]'
 disable-model-invocation: true
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" *)
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" result "$ARGUMENTS"`

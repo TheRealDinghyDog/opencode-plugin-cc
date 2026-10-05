@@ -2,7 +2,7 @@
 description: Run a OpenCode review that challenges the implementation approach and design choices
 argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [focus ...]'
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
+allowed-tools: Read, Glob, Grep, Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" *), AskUserQuestion
 ---
 
 Run an adversarial OpenCode review through the shared plugin runtime.

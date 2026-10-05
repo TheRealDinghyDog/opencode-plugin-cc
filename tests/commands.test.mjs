@@ -85,3 +85,79 @@ test("stop review hook passes an explicit task classification flag", () => {
   const source = read("scripts/stop-review-gate-hook.mjs");
   assert.match(source, /"task", "--json", "--stop-review", prompt/);
 });
+
+// The directory holds any version whose allowed-tools pre-approve a wildcard
+// right after an interpreter or package manager, such as Bash(node:*). Each
+// Bash rule has to name the exact script or command instead. Bash rules match
+// the literal command text, so the companion rule keeps the quotes that every
+// invocation puts around the script path.
+const COMPANION_PREFIX = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" ';
+const COMPANION_RULE = `Bash(${COMPANION_PREFIX}*)`;
+const NPM_INSTALL = "npm install -g opencode-ai";
+
+function commandFiles() {
+  return fs
+    .readdirSync(path.join(PLUGIN_ROOT, "commands"))
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => `commands/${name}`);
+}
+
+function allowedTools(source) {
+  // Windows checkouts may use CRLF line endings.
+  const frontmatter = source.replace(/\r\n/g, "\n").match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
+  const line = frontmatter.split("\n").find((entry) => entry.startsWith("allowed-tools:"));
+  if (!line) {
+    return [];
+  }
+  // Split on commas outside parentheses; a rule's text may contain commas.
+  const tools = [];
+  let depth = 0;
+  let current = "";
+  for (const char of line.slice("allowed-tools:".length)) {
+    if (char === "," && depth === 0) {
+      tools.push(current.trim());
+      current = "";
+      continue;
+    }
+    depth += char === "(" ? 1 : char === ")" ? -1 : 0;
+    current += char;
+  }
+  tools.push(current.trim());
+  return tools.filter(Boolean);
+}
+
+test("commands pre-approve only the companion script and exact commands", () => {
+  for (const file of commandFiles()) {
+    const tools = allowedTools(read(file));
+    assert.ok(tools.length > 0, `${file} has no allowed-tools`);
+    const bashRules = tools.filter((tool) => tool === "Bash" || tool.startsWith("Bash("));
+    for (const rule of bashRules) {
+      const allowed = rule === COMPANION_RULE || (file === "commands/setup.md" && rule === `Bash(${NPM_INSTALL})`);
+      assert.ok(allowed, `${file} pre-approves ${rule}`);
+    }
+  }
+});
+
+test("every node and npm invocation in a command matches its allowed-tools rule", () => {
+  for (const file of commandFiles()) {
+    const source = read(file);
+    const tools = allowedTools(source);
+    const invocations = [...source.matchAll(/\bnode "[^\n`]*/g)].map((match) => match[0]);
+    for (const invocation of invocations) {
+      assert.ok(invocation.startsWith(COMPANION_PREFIX), `${file}: ${invocation}`);
+      assert.ok(tools.includes(COMPANION_RULE), `${file} runs the companion without ${COMPANION_RULE}`);
+    }
+    for (const line of source.split(/\r?\n/).filter((entry) => /^\s*npm /.test(entry))) {
+      assert.equal(line.trim(), NPM_INSTALL, file);
+      assert.ok(tools.includes(`Bash(${NPM_INSTALL})`), `${file} runs npm without its exact rule`);
+    }
+  }
+});
+
+test("review commands rely on Claude Code's built-in read-only git approval", () => {
+  for (const file of ["commands/review.md", "commands/adversarial-review.md"]) {
+    const source = read(file);
+    assert.match(source, /git status --short --untracked-files=all/, file);
+    assert.ok(!allowedTools(source).some((tool) => tool.startsWith("Bash(git")), file);
+  }
+});

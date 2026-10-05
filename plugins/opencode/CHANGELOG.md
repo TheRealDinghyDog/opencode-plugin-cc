@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2
+
+- Commands now pre-approve only the plugin's own companion script, instead of any `node`, `git`, or `npm` command. Review commands rely on Claude Code's built-in approval of read-only `git` commands, and `/opencode:setup` pre-approves only `npm install -g opencode-ai`, which it runs after you choose to install.
+
 ## 1.0.1
 
 - When a model call fails (unsupported model, quota, expired login), commands now report OpenCode's error. Previously the user's own prompt came back as if it were OpenCode's answer, and reviews reported a JSON parse failure.
