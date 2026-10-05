@@ -22,6 +22,9 @@
 //
 // FAKE_OPENCODE_V2_IGNORE_INTERRUPT=1 records interrupts without stopping the
 // turn, so a cancelled worker is still running when cancel ends it (#77).
+//
+// FAKE_OPENCODE_V2_DROP_BEFORE_ASK=1 ends every event stream right before a
+// permission request or question, and sends no further events (#84).
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -201,7 +204,22 @@ function startServer(args) {
   let seq = 0;
   const id = (prefix) => `${prefix}_fake${String(nextId++).padStart(6, "0")}`;
 
+  let streamsDropped = false;
+  function dropStreams() {
+    streamsDropped = true;
+    for (const client of clients) {
+      client.end();
+    }
+    clients.clear();
+  }
+
   function emit(type, data, sessionID = data?.sessionID) {
+    if (process.env.FAKE_OPENCODE_V2_DROP_BEFORE_ASK === "1" && (type === "permission.asked" || type === "form.created")) {
+      dropStreams();
+    }
+    if (streamsDropped) {
+      return;
+    }
     const session = sessions.get(sessionID);
     const event = {
       id: id("evt"),

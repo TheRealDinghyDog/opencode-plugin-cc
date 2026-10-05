@@ -101,6 +101,34 @@ test("a write task rejects a guarded permission ask and never writes outside the
   }
 });
 
+// Issue #84: the event stream drops right before an ask. The ask shows up
+// only in the pending lists, and recovery must still answer it by policy.
+test("after a stream drop, a 2.x permission request is still rejected", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("permission", { FAKE_OPENCODE_V2_DROP_BEFORE_ASK: "1" });
+  try {
+    const result = companion(ctx, ["task", "--write", "write outside the workspace"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Handled the requested task/);
+    const state = readFakeState(ctx.binDir);
+    assert.deepEqual(state.permissionReplies.map((reply) => reply.body.decision), ["reject"]);
+    assert.equal(state.outsideWrites, 0);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("after a stream drop, a 2.x question is still handed back", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("form", { FAKE_OPENCODE_V2_DROP_BEFORE_ASK: "1" });
+  try {
+    const asked = companion(ctx, ["task", "decide something"]);
+    assert.notEqual(asked.status, 0);
+    assert.match(asked.stdout, /OpenCode stopped to ask a question[\s\S]*Which approach should I take\?\n- Option A\n- Option B/);
+    assert.deepEqual(readFakeState(ctx.binDir).formActions.map((action) => action.action), ["cancel"]);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
 test("a 2.x question is handed back with its options, and resuming with the answer finishes the job", { skip: LOCAL_LISTEN_SKIP }, () => {
   const ctx = setup("form");
   try {

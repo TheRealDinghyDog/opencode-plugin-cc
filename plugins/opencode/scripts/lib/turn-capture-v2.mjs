@@ -78,6 +78,9 @@ export function createV2TurnState(sessionID, options = {}) {
     childLabels: new Map(),
     nextChildIndex: 1,
     seen: new Set(),
+    // Permission requests and forms already answered, by id: after a stream
+    // drop they can also turn up in the pending lists (issue #84).
+    askIDs: new Set(),
     // Main-session steps in arrival order, each step's text, and the input
     // (inbox item) each step answers.
     steps: [],
@@ -235,6 +238,10 @@ export function applyV2Event(state, event) {
       }
       break;
     case "permission.asked": {
+      if (state.askIDs.has(data.id)) {
+        break;
+      }
+      state.askIDs.add(data.id);
       const target = (Array.isArray(data.resources) ? data.resources : []).join(", ");
       progress(
         state,
@@ -246,6 +253,10 @@ export function applyV2Event(state, event) {
     }
     case "form.created": {
       const form = data.form ?? {};
+      if (state.askIDs.has(form.id)) {
+        break;
+      }
+      state.askIDs.add(form.id);
       const titles = (Array.isArray(form.fields) ? form.fields : [])
         .map((field) => field?.description || field?.title)
         .filter(Boolean)
@@ -322,6 +333,27 @@ async function answerAsk(client, state, ask) {
     progress(state, `OpenCode ${ask.type === "cancel-form" ? "question" : "permission"} response failed: ${error.message}`, "failed");
     complete(state, "failed");
   }
+}
+
+// After the event stream drops, a permission request or question raised since
+// then shows up only in the session's pending lists, and an unanswered one
+// holds the turn until the timeout (issue #84). Each pending item goes through
+// the same policy as its event: the list items are the events' payloads.
+export async function pendingAsksAfterDrop(client, state) {
+  const asks = [];
+  for (const sessionID of state.sessionIDs) {
+    const [permissions, forms] = await Promise.all([
+      client.listPermissions(sessionID).catch(() => []),
+      client.listForms(sessionID).catch(() => [])
+    ]);
+    for (const request of permissions) {
+      asks.push(...applyV2Event(state, { type: "permission.asked", data: request }));
+    }
+    for (const form of forms) {
+      asks.push(...applyV2Event(state, { type: "form.created", data: { form } }));
+    }
+  }
+  return asks;
 }
 
 function assistantText(item) {
@@ -475,6 +507,9 @@ export async function captureV2Turn(client, sessionID, prompt, options = {}) {
     // poll the message list until it shows how the turn ended.
     const streamDropRecovery = eventStream.then(async () => {
       while (!state.completed && !timedOut) {
+        for (const ask of await pendingAsksAfterDrop(client, state)) {
+          await answerAsk(client, state, ask);
+        }
         await recoverV2Turn(client, state, options);
         if (state.completed || timedOut) {
           break;
