@@ -357,7 +357,11 @@ export async function recoverV2Turn(client, state, options = {}) {
   if (!idle) {
     return false;
   }
-  if (!state.finalMessage) {
+  // While streaming, the answer can be provisional: the text of a step that
+  // went on to call tools ("I'll create that file"). Unless the stream already
+  // saw a complete ("stop") reply, take the answer from the stored items
+  // (issue #88). Stored assistant items carry the streamed step ids.
+  if (!state.finalMessage || state.stepFinish.get(state.finalMessageID) !== "stop") {
     // The same rule as refreshFinalMessage, on the stored items: walking
     // forward from our prompt, the replies before the next input (a reminder,
     // a queued message) are ours; prefer a complete ("stop") reply.
