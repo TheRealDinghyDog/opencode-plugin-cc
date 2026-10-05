@@ -37,6 +37,21 @@ function validateReviewResultShape(data) {
   if (!Array.isArray(data.next_steps)) {
     return "Missing array `next_steps`.";
   }
+  // A finding without its text would render as an empty placeholder and lose
+  // what the reviewer said; show the raw reply instead (issue #89).
+  const incomplete = data.findings.findIndex(
+    (finding) =>
+      !finding ||
+      typeof finding !== "object" ||
+      Array.isArray(finding) ||
+      typeof finding.title !== "string" ||
+      !finding.title.trim() ||
+      typeof finding.body !== "string" ||
+      !finding.body.trim()
+  );
+  if (incomplete >= 0) {
+    return `Finding ${incomplete + 1} is not an object with a title and body.`;
+  }
   return null;
 }
 
@@ -203,6 +218,14 @@ export function renderSetupReport(report) {
     for (const step of report.nextSteps) {
       lines.push(`- ${step}`);
     }
+    lines.push("");
+  }
+
+  if (report.notes?.length > 0) {
+    lines.push("Notes:");
+    for (const note of report.notes) {
+      lines.push(`- ${note}`);
+    }
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
@@ -314,7 +337,29 @@ export function renderNativeReviewResult(result, meta) {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
+// OpenCode 2.x can only dismiss a question by stopping the turn. The output
+// says what was asked and how to resume with the answer; Claude answers from
+// the conversation, or asks the user, and resumes (see commands/rescue.md).
+export function renderOpenCodeQuestion(question) {
+  const lines = ["OpenCode stopped to ask a question, which this run can't answer interactively:", ""];
+  for (const field of question?.fields ?? []) {
+    lines.push(field.question || field.key || "(no question text)");
+    for (const option of field.options ?? []) {
+      lines.push(`- ${option.label}${option.description ? `: ${option.description}` : ""}`);
+    }
+    if (field.custom && (field.options ?? []).length > 0) {
+      lines.push("- (or another answer)");
+    }
+    lines.push("");
+  }
+  lines.push("To continue, resume this OpenCode session with the answer, for example:", "/opencode:rescue --resume <answer>");
+  return `${lines.join("\n")}\n`;
+}
+
 export function renderTaskResult(parsedResult, meta) {
+  if (parsedResult?.question) {
+    return renderOpenCodeQuestion(parsedResult.question);
+  }
   const rawOutput = typeof parsedResult?.rawOutput === "string" ? parsedResult.rawOutput : "";
   const failureMessage = String(parsedResult?.failureMessage ?? "").trim();
   // A failed turn must surface its error, even after partial output.

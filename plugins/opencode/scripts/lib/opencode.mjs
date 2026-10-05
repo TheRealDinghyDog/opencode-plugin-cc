@@ -1,19 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { buildOpenCodeImportDocumentFromClaudeJsonl } from "./claude-session-transfer.mjs";
+import {
+  buildOpenCodeImportDocumentFromClaudeJsonl,
+  buildOpenCodeV2ImportDocumentFromClaudeJsonl
+} from "./claude-session-transfer.mjs";
 import { createTempDir, readJsonFile, writeJsonFile } from "./fs.mjs";
 import {
   OpencodeHttpError,
   OpencodeServerClient,
-  SUPPORTED_OPENCODE_MAJOR,
+  EXPERIMENTAL_OPENCODE_MAJOR,
+  isSupportedOpencodeMajor,
   parseOpencodeVersionInfo,
   unsupportedOpencodeVersionMessage
 } from "./opencode-server.mjs";
+import { OPENCODE_V2_MAJOR, OpencodeV2Client } from "./opencode-server-v2.mjs";
+import { captureV2Turn, recoveryWatch, resolveTurnTimeoutMs } from "./turn-capture-v2.mjs";
 import {
   SERVER_PASSWORD_ENV,
   SERVER_URL_ENV,
   SERVER_USERNAME_ENV,
+  detectServerApi,
   ensureServer,
   loadServerSession,
   serverSessionCredentials
@@ -30,7 +37,6 @@ const READ_ONLY_AGENT = "plan";
 // last-resort ceiling so a dropped event stream can't hang the turn forever
 // (issue #2 / review finding #17). Deep reviews legitimately run many minutes,
 // so keep it generous; on expiry we still try to recover the final message.
-const DEFAULT_TURN_TIMEOUT_MS = 30 * 60 * 1000;
 // After the event stream drops, wait this long for the held-open /message
 // response and any trailing events to land before the first HTTP recovery
 // poll. This is a grace before polling STARTS — not a deadline (issue #30).
@@ -681,6 +687,15 @@ function describeQuestions(event) {
 // runs have nobody to answer, so reject immediately — the model receives the
 // rejection and must proceed autonomously — instead of stalling the turn
 // until the outer timeout (issue #28 / review M-02).
+// A reply to a request that is no longer pending: once one request of a step
+// is rejected, OpenCode drops the step's other requests and answers a reply
+// to them with 404 (issue #63). Nothing waits on such a request, so the turn
+// goes on; any other failure still fails it, since an undelivered reply
+// could leave the turn waiting.
+function replyNoLongerPending(error) {
+  return error instanceof OpencodeHttpError && (error.status === 404 || error.status === 409);
+}
+
 async function respondToQuestion(client, state, event) {
   const requestID = extractQuestionRequestId(event);
   if (!requestID) {
@@ -695,6 +710,10 @@ async function respondToQuestion(client, state, event) {
   try {
     await client.rejectQuestion(requestID);
   } catch (error) {
+    if (replyNoLongerPending(error)) {
+      emitProgress(state.onProgress, `OpenCode question ${requestID} was no longer pending (HTTP ${error.status}).`, "running");
+      return;
+    }
     state.error = error;
     emitProgress(state.onProgress, `OpenCode question rejection failed: ${error.message}`, "failed");
   }
@@ -733,6 +752,14 @@ async function respondToPermission(client, state, event, sessionID) {
   try {
     await client.respondPermission(sessionID, permissionID, "reject");
   } catch (error) {
+    if (replyNoLongerPending(error)) {
+      emitProgress(
+        state.onProgress,
+        `OpenCode permission request ${permissionID} was no longer pending (HTTP ${error.status}); nothing left to reject.`,
+        "running"
+      );
+      return;
+    }
     state.error = error;
     emitProgress(state.onProgress, `OpenCode permission response failed: ${error.message}`, "failed");
   }
@@ -891,16 +918,26 @@ async function recoverFinalMessageFromServer(client, state, options = {}) {
       requestTimeoutMs: recoveryTimeoutMs
     });
     const messages = getMessagesArray(raw).filter(isAssistantMessage);
-    let assistant = state.messageID
-      ? messages.find((message) => extractMessageId(message) === state.messageID)
-      : null;
-    if (!assistant && (state.priorAssistantSnapshotSucceeded || !state.resumed)) {
-      assistant = messages
-        .filter((message) => {
-          const messageID = extractMessageId(message);
-          return messageID && !state.priorAssistantIds.has(messageID);
-        })
-        .pop();
+    const turnMessages = () =>
+      state.priorAssistantSnapshotSucceeded || !state.resumed
+        ? messages.filter((message) => {
+            const messageID = extractMessageId(message);
+            return messageID && !state.priorAssistantIds.has(messageID);
+          })
+        : [];
+    const byID = state.messageID ? messages.find((message) => extractMessageId(message) === state.messageID) : null;
+    let assistant;
+    if (options.requireFinished) {
+      // 1.18 stores one assistant message per step (oldest first): the turn is
+      // done only once its latest one finished with something other than
+      // tool calls (issue #87).
+      assistant = turnMessages().pop() ?? byID;
+      const finish = assistant?.info?.finish ?? assistant?.finish ?? null;
+      if (!finish || finish === "tool-calls") {
+        return false;
+      }
+    } else {
+      assistant = byID ?? turnMessages().pop() ?? null;
     }
     if (!assistant) {
       return false;
@@ -967,7 +1004,7 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
       rejectOpen(error);
     });
 
-  const turnTimeoutMs = Math.max(0, Number(options.turnTimeoutMs) || DEFAULT_TURN_TIMEOUT_MS);
+  const turnTimeoutMs = resolveTurnTimeoutMs(options);
   let timedOut = false;
   let turnTimer = null;
   // Hoisted so the finally block can drain it even if the try throws early.
@@ -1049,17 +1086,39 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
     // HTTP. So once the stream closes: wait a short grace for the response and
     // trailing events to land, then actively poll the server for the finished
     // message until the turn completes another way (response fallback,
-    // recovery, session.idle over a reconnect) or the OUTER turn timeout fires.
+    // recovery, session.idle over a reconnect), or recovery can no longer
+    // succeed (issue #87). There is no turn time limit any more.
     // We never fail the turn merely because the stream ended (issue #30).
+    const watch = recoveryWatch(options);
     streamDropRecovery = eventStream.then(async () => {
       if (streamDropGraceMs > 0 && !state.completed && !responseSettled) {
         await Promise.race([state.completion, responseSettledPromise, sleep(streamDropGraceMs)]);
       }
       while (!state.completed && !timedOut) {
-        // Only fetch when we actually lack a result; skip the redundant GET if
-        // parts already streamed in before the drop (issue #12).
-        if (!state.error && !state.finalMessage && state.structuredOutput == null) {
-          await recoverFinalMessageFromServer(client, state, { recoveryTimeoutMs: options.recoveryTimeoutMs });
+        // Fetch when we lack a result; skip the redundant GET if parts already
+        // streamed in before the drop (issue #12) while the held-open response
+        // can still complete the turn. Once that response is gone too (it fails
+        // on long turns), only the finished message on the server can (#87).
+        const lacking = !state.error && !state.finalMessage && state.structuredOutput == null;
+        // A response that arrived completes the turn after its short grace;
+        // only a failed one leaves recovery as the way to finish.
+        const responseFailed = responseSettled && state.responseError != null;
+        if (lacking || responseFailed) {
+          state.recoveryError = null;
+          await recoverFinalMessageFromServer(client, state, {
+            recoveryTimeoutMs: options.recoveryTimeoutMs,
+            requireFinished: !lacking
+          });
+          // While the held-open response is still open it can deliver the
+          // finished message itself, even when listing messages can't (#92):
+          // only judge recovery once it has failed.
+          const stop = state.completed || !responseFailed ? null : watch(state.recoveryError, state.sessionID);
+          if (stop) {
+            state.error = stop;
+            emitProgress(state.onProgress, stop.message, "failed");
+            completeTurn(state);
+            break;
+          }
         }
         if (state.completed || timedOut) {
           break;
@@ -1129,8 +1188,10 @@ function canonicalWorkspaceDirectory(cwd) {
   }
 }
 
+// ensureServer records which API the server speaks; legacy records are 1.x.
 function buildServerClient(cwd, server) {
-  return new OpencodeServerClient(server.url, {
+  const Client = server.api === OPENCODE_V2_MAJOR ? OpencodeV2Client : OpencodeServerClient;
+  return new Client(server.url, {
     ...serverSessionCredentials(server),
     directory: canonicalWorkspaceDirectory(cwd)
   });
@@ -1163,10 +1224,14 @@ function resolveCredentialsForServerUrl(cwd, serverUrl) {
 }
 
 async function abortSessionAtUrl(serverUrl, threadId, timeoutMs = 1000, credentials = {}, directory = null) {
+  // A job record keeps only the server URL, so ask the server which API it
+  // speaks (2.x interrupts instead of aborting).
+  const api = await detectServerApi(serverUrl, timeoutMs, credentials);
+  const Client = api === OPENCODE_V2_MAJOR ? OpencodeV2Client : OpencodeServerClient;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const client = new OpencodeServerClient(serverUrl, {
+    const client = new Client(serverUrl, {
       ...credentials,
       ...(directory ? { directory } : {})
     });
@@ -1199,11 +1264,17 @@ function sessionTitle(session) {
 }
 
 function sessionDirectory(session) {
-  return session?.directory ?? session?.cwd ?? session?.path ?? "";
+  return session?.directory ?? session?.location?.directory ?? session?.cwd ?? session?.path ?? "";
 }
 
+// Both APIs report `time.updated` in epoch milliseconds; Date.parse() of a
+// number is NaN, which used to make every session tie.
 function sessionUpdatedAt(session) {
-  return Date.parse(session?.updatedAt ?? session?.updated_at ?? session?.time?.updated ?? "") || 0;
+  const value = session?.updatedAt ?? session?.updated_at ?? session?.time?.updated ?? null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return Date.parse(value ?? "") || 0;
 }
 
 function buildAuthStatus(fields = {}) {
@@ -1237,7 +1308,7 @@ export function getAvailability(cwd, env = process.env) {
   // user-managed external server is checked by its own health response
   // instead, since turns never touch the local binary's server API.
   const versionInfo = parseOpencodeVersionInfo(versionStatus.detail);
-  if (versionInfo && versionInfo.major > SUPPORTED_OPENCODE_MAJOR && !env?.[SERVER_URL_ENV]) {
+  if (versionInfo && !isSupportedOpencodeMajor(versionInfo.major) && !env?.[SERVER_URL_ENV]) {
     return {
       available: false,
       unsupported: true,
@@ -1254,9 +1325,13 @@ export function getAvailability(cwd, env = process.env) {
     };
   }
 
+  // 2.x support is experimental (issue #56); say so wherever the version shows.
+  const experimental = versionInfo?.major === EXPERIMENTAL_OPENCODE_MAJOR;
   return {
     available: true,
-    detail: `${versionStatus.detail}; headless server available`
+    major: versionInfo?.major ?? null,
+    experimental,
+    detail: `${versionStatus.detail}; headless server available${experimental ? "; OpenCode 2.x support is experimental" : ""}`
   };
 }
 
@@ -1309,6 +1384,33 @@ function extractConnectedProviderIds(provider) {
     .filter(Boolean);
 }
 
+// 2.x lists stored logins at /api/credential; its /api/provider list stays
+// empty on a real setup, and the model routes are still loading right after
+// the server starts (#82). Only the integration ids and `active` are read:
+// each entry also carries the secret itself.
+async function getV2AuthStatus(client) {
+  const credentials = await client.listCredentials();
+  const logins = [
+    ...new Set(credentials.filter((credential) => credential?.active === true).map((credential) => credential.integrationID))
+  ].filter((id) => typeof id === "string" && id);
+  if (logins.length === 0) {
+    return buildAuthStatus({
+      loggedIn: false,
+      detail:
+        "No stored OpenCode 2.x login. Log in with `opencode auth login <provider>`, then rerun /opencode:setup (API keys in the environment work too).",
+      source: "server",
+      available: true,
+      provider: null
+    });
+  }
+  return buildAuthStatus({
+    loggedIn: true,
+    detail: `OpenCode 2.x logins: ${logins.join(", ")}`,
+    source: "server",
+    provider: logins[0]
+  });
+}
+
 export async function getAuthStatus(cwd) {
   const availability = getAvailability(cwd);
   if (!availability.available) {
@@ -1320,7 +1422,10 @@ export async function getAuthStatus(cwd) {
   }
 
   try {
-    return await withServer(cwd, async (client) => {
+    return await withServer(cwd, async (client, server) => {
+      if (server.api === OPENCODE_V2_MAJOR) {
+        return getV2AuthStatus(client);
+      }
       const [config, provider] = await Promise.all([
         client.getConfig().catch((error) => ({ error })),
         client.getProvider().catch((error) => ({ error }))
@@ -1453,6 +1558,318 @@ export async function interruptServerTurn(cwd, { threadId, serverUrl = null, ser
   }
 }
 
+// OpenCode 2.x selects the model per session as {providerID, id, variant}.
+// Variants are defined per model, so --effort is checked against that
+// model's own list instead of being sent blindly (an unknown variant fails
+// the turn with provider.no-route).
+// Right after `opencode serve` starts, 2.x lists no models, then a partial
+// set, for a few seconds; its default-model route meanwhile names OpenCode's
+// free fallback (issue #82). So a requested model gets that long to appear.
+const V2_MODEL_WAIT_MS = 10_000;
+const V2_MODEL_POLL_MS = 500;
+
+async function findV2Model(client, target) {
+  const deadline = Date.now() + V2_MODEL_WAIT_MS;
+  for (;;) {
+    const models = await client.listModels();
+    const match = models.find(
+      (candidate) =>
+        candidate?.providerID === target.providerID &&
+        (candidate.id === target.modelID || candidate.modelID === target.modelID)
+    );
+    if (match || Date.now() >= deadline) {
+      return match ?? null;
+    }
+    await sleep(V2_MODEL_POLL_MS);
+  }
+}
+
+async function resolveV2ModelRef(client, model, effort) {
+  const target = normalizeModelSelection(model);
+  if (!target && !effort) {
+    // No model sent: OpenCode picks the configured one when the turn runs.
+    return null;
+  }
+  if (!target) {
+    // 2.x puts the effort on the model reference, so it needs the model, and
+    // the default-model route can't be trusted to name it (#82).
+    throw new Error("On OpenCode 2.x, --effort needs --model provider/model as well.");
+  }
+  const match = await findV2Model(client, target);
+  if (!match) {
+    throw new Error(
+      `OpenCode has no model ${target.providerID}/${target.modelID}. Run \`opencode models\` to list the available ones.`
+    );
+  }
+  if (effort) {
+    const variants = (Array.isArray(match.variants) ? match.variants : []).map((variant) => variant?.id).filter(Boolean);
+    if (!variants.includes(effort)) {
+      throw new Error(
+        `OpenCode 2.x model ${target.providerID}/${target.modelID} has no "${effort}" effort. Available: ${variants.join(", ") || "none"}.`
+      );
+    }
+  }
+  return { providerID: target.providerID, id: match.id ?? target.modelID, ...(effort ? { variant: effort } : {}) };
+}
+
+// 2.x cannot constrain a reply to a JSON schema: the prompt route has no
+// `format`, and the generate routes return plain text. So the schema travels
+// in the prompt, and the JSON object is taken out of the reply (issue #54).
+function buildV2StructuredPrompt(prompt, schema) {
+  return `${prompt}\n\n<output_schema>\n${JSON.stringify(schema, null, 2)}\n</output_schema>\n\nReply with only one JSON object that matches output_schema: no prose before or after it, and no code fences.`;
+}
+
+function buildV2RepairPrompt(problem) {
+  return `Your previous reply was not a JSON object matching output_schema (${problem}). Reply again with only that JSON object: no prose, no code fences.`;
+}
+
+function balancedObjectEnd(text, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return -1;
+}
+
+// The whole reply, a ```json fence, or the first balanced {...} in it.
+export function extractJsonObject(text) {
+  const source = String(text ?? "").trim();
+  if (!source) {
+    return null;
+  }
+  const candidates = [source];
+  const fenced = /```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n?```/i.exec(source);
+  if (fenced) {
+    candidates.push(fenced[1]);
+  }
+  const start = source.indexOf("{");
+  if (start >= 0) {
+    const end = balancedObjectEnd(source, start);
+    if (end > start) {
+      candidates.push(source.slice(start, end + 1));
+    }
+  }
+  for (const candidate of candidates) {
+    try {
+      const value = JSON.parse(candidate);
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return value;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return null;
+}
+
+const SCHEMA_TYPES = {
+  object: (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value),
+  array: Array.isArray,
+  string: (value) => typeof value === "string",
+  integer: Number.isInteger,
+  number: (value) => typeof value === "number" && Number.isFinite(value),
+  boolean: (value) => typeof value === "boolean"
+};
+
+// 2.x checks no schema server-side, so a reply is validated here against the
+// keywords the plugin's schemas use (issue #89): type, required, properties,
+// items, enum, minLength, minimum, maximum. Extra keys are let through, as
+// they lose nothing. Returns the first problem, or null.
+function schemaViolation(value, schema, where = "the reply") {
+  if (!schema || typeof schema !== "object") {
+    return null;
+  }
+  if (schema.type && SCHEMA_TYPES[schema.type] && !SCHEMA_TYPES[schema.type](value)) {
+    return `${where} is not ${/^[aeiou]/.test(schema.type) ? "an" : "a"} ${schema.type}`;
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+    return `${where} is not one of ${schema.enum.map((option) => JSON.stringify(option)).join(", ")}`;
+  }
+  if (typeof value === "string" && Number.isInteger(schema.minLength) && value.trim().length < schema.minLength) {
+    return `${where} is empty`;
+  }
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      return `${where} is below ${schema.minimum}`;
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      return `${where} is above ${schema.maximum}`;
+    }
+  }
+  if (SCHEMA_TYPES.object(value)) {
+    const prefix = where === "the reply" ? "" : `${where}.`;
+    const missing = (Array.isArray(schema.required) ? schema.required : []).find((key) => !(key in value));
+    if (missing) {
+      return `${prefix || "the reply's "}"${missing}" is missing`;
+    }
+    for (const [key, property] of Object.entries(schema.properties ?? {})) {
+      if (key in value) {
+        const problem = schemaViolation(value[key], property, `${prefix}${key}`);
+        if (problem) {
+          return problem;
+        }
+      }
+    }
+  }
+  if (Array.isArray(value) && schema.items) {
+    for (const [index, item] of value.entries()) {
+      const problem = schemaViolation(item, schema.items, `${where}[${index}]`);
+      if (problem) {
+        return problem;
+      }
+    }
+  }
+  return null;
+}
+
+function parseStructuredReply(text, schema) {
+  const value = extractJsonObject(text);
+  if (!value) {
+    return { value: null, problem: "no JSON object found" };
+  }
+  const problem = schemaViolation(value, schema);
+  return problem ? { value: null, problem } : { value, problem: null };
+}
+
+// Asks for the schema's JSON in the reply text, with one repair turn in the
+// same session, which keeps the context. It is 2.x's only way (#54), and
+// 1.x's fallback when the model refuses OpenCode's forced structured-output
+// tool call (#90). `runTurn(text)` runs one turn and returns its state.
+async function structuredReplyTurns(runTurn, prompt, schema, onProgress) {
+  let turnState = await runTurn(buildV2StructuredPrompt(prompt, schema));
+  if (turnState.error) {
+    return { turnState, structured: null };
+  }
+  let parsed = parseStructuredReply(turnState.finalMessage, schema);
+  if (!parsed.value) {
+    emitProgress(onProgress, `OpenCode's reply was not the requested JSON (${parsed.problem}); asking once more.`, "finalizing");
+    const repair = await runTurn(buildV2RepairPrompt(parsed.problem));
+    if (!repair.error) {
+      parsed = parseStructuredReply(repair.finalMessage, schema);
+    }
+    turnState = { ...repair, touchedFiles: new Set([...turnState.touchedFiles, ...repair.touchedFiles]) };
+  }
+  return { turnState, structured: parsed.value };
+}
+
+// 1.x implements `format: json_schema` by forcing a StructuredOutput tool call,
+// and some models refuse forced tool calls: DeepSeek's thinking mode answers
+// "Thinking mode does not support this tool_choice" (issue #90).
+function refusedForcedToolCall(error) {
+  return /tool[_ ]?choice|structured[ _-]?output|response[_ ]?format|json[_ ]?schema/i.test(String(error?.message ?? ""));
+}
+
+async function runV2Turn(cwd, client, server, options) {
+  const model = await resolveV2ModelRef(client, options.model, options.variant ?? options.effort ?? null);
+  let sessionID = options.resumeThreadId ?? options.resumeSessionId ?? null;
+  let createdSessionID = null;
+
+  if (sessionID) {
+    emitProgress(options.onProgress, `Resuming OpenCode session ${sessionID}.`, "starting", {
+      threadId: sessionID,
+      serverUrl: server.url
+    });
+    // 2.x keeps the agent on the session, so a resumed session still has the
+    // agent of the turn that created it: switch it, or a read-only follow-up
+    // to a write task could still write (issue #86). 1.x sends the agent with
+    // every prompt.
+    if (options.agent) {
+      await client.setAgent(sessionID, options.agent);
+    }
+    if (model) {
+      await client.setModel(sessionID, model);
+    }
+  } else {
+    emitProgress(options.onProgress, "Starting OpenCode task session.", "starting", { serverUrl: server.url });
+    const rawTitle =
+      options.threadName ?? options.title ?? (options.taskSessionTitle ? buildTaskSessionName(options.prompt) : null);
+    // As on 1.x (issue #26): no session permission rules. The stock agents'
+    // guards stay in force and every ask is rejected headlessly.
+    const session = await client.createSession({
+      title: typeof rawTitle === "string" && rawTitle.trim() ? rawTitle : undefined,
+      agent: options.agent,
+      model: model ?? undefined,
+      directory: canonicalWorkspaceDirectory(cwd)
+    });
+    sessionID = session?.id ?? null;
+    if (!sessionID) {
+      throw new Error("OpenCode did not return a session id.");
+    }
+    createdSessionID = sessionID;
+    emitProgress(options.onProgress, `Session ready (${sessionID}).`, "starting", {
+      threadId: sessionID,
+      serverUrl: server.url
+    });
+  }
+
+  const captureOptions = {
+    onProgress: options.onProgress,
+    turnTimeoutMs: options.turnTimeoutMs,
+    eventOpenTimeoutMs: options.eventOpenTimeoutMs,
+    streamDropPollIntervalMs: options.streamDropPollIntervalMs,
+    recoveryTimeoutMs: options.recoveryTimeoutMs
+  };
+  const runTurn = (text) => captureV2Turn(client, sessionID, text, captureOptions);
+  let turnState;
+  let structured = null;
+  try {
+    if (options.outputSchema) {
+      ({ turnState, structured } = await structuredReplyTurns(runTurn, options.prompt, options.outputSchema, options.onProgress));
+    } else {
+      turnState = await runTurn(options.prompt);
+    }
+  } catch (error) {
+    if (createdSessionID) {
+      try {
+        await client.deleteSession(createdSessionID);
+      } catch {
+        // Preserve the turn failure; session deletion is best-effort cleanup.
+      }
+    }
+    throw error;
+  }
+
+  return {
+    status: turnState.error ? 1 : 0,
+    threadId: sessionID,
+    turnId: turnState.messageID,
+    serverUrl: server.url,
+    finalMessage: structured ? JSON.stringify(structured) : turnState.finalMessage,
+    structuredOutput: structured,
+    reasoningSummary: turnState.reasoningSummary,
+    turn: {
+      id: turnState.messageID ?? "opencode-message",
+      status: turnState.error ? "failed" : "completed"
+    },
+    error: turnState.error,
+    stderr: "",
+    fileChanges: [],
+    touchedFiles: [...turnState.touchedFiles],
+    commandExecutions: turnState.commandExecutions,
+    question: turnState.question ?? null
+  };
+}
+
 export async function runServerTurn(cwd, options = {}) {
   const availability = getAvailability(cwd);
   if (!availability.available) {
@@ -1473,6 +1890,10 @@ export async function runServerTurn(cwd, options = {}) {
       // server is plugin-owned without consulting its own environment.
       serverExternal: Boolean(server.external)
     });
+
+    if (server.api === OPENCODE_V2_MAJOR) {
+      return runV2Turn(cwd, client, server, { ...options, prompt, write, agent });
+    }
 
     let sessionID = options.resumeThreadId ?? options.resumeSessionId ?? null;
     let createdSessionID = null;
@@ -1506,18 +1927,17 @@ export async function runServerTurn(cwd, options = {}) {
       });
     }
 
-    let turnState;
-    try {
-      turnState = await captureTurn(
+    const runTurn = (text, { outputSchema = null, resumed = true } = {}) =>
+      captureTurn(
         client,
         sessionID,
         (signal) =>
           client.sendMessage(
             sessionID,
-            buildMessageParams(prompt, {
+            buildMessageParams(text, {
               model: options.model,
               variant: options.variant ?? options.effort ?? null,
-              outputSchema: options.outputSchema ?? null,
+              outputSchema,
               write,
               agent
             }),
@@ -1525,10 +1945,23 @@ export async function runServerTurn(cwd, options = {}) {
           ),
         {
           onProgress: options.onProgress,
-          resumed: resumedSession,
+          resumed,
           turnTimeoutMs: options.turnTimeoutMs
         }
       );
+    let turnState;
+    let structured = null;
+    try {
+      turnState = await runTurn(prompt, { outputSchema: options.outputSchema ?? null, resumed: resumedSession });
+      structured = turnState.structuredOutput ?? null;
+      if (options.outputSchema && structured === null && refusedForcedToolCall(turnState.error)) {
+        emitProgress(
+          options.onProgress,
+          `The model refused OpenCode's structured-output tool call (${turnState.error.message}); asking for the JSON in the reply instead.`,
+          "finalizing"
+        );
+        ({ turnState, structured } = await structuredReplyTurns(runTurn, prompt, options.outputSchema, options.onProgress));
+      }
     } catch (error) {
       if (createdSessionID) {
         try {
@@ -1540,7 +1973,6 @@ export async function runServerTurn(cwd, options = {}) {
       throw error;
     }
 
-    const structured = turnState.structuredOutput;
     const finalMessage =
       options.outputSchema && structured !== null && structured !== undefined
         ? typeof structured === "string"
@@ -1598,7 +2030,7 @@ export async function findLatestTaskThread(cwd) {
   const canonicalCwd = canonicalWorkspaceDirectory(cwd);
   return withServer(cwd, async (client) => {
     const sessions = getSessionsArray(await client.listSessions())
-      .filter((session) => sessionTitle(session).startsWith(TASK_SESSION_PREFIX))
+      .filter((session) => sessionTitle(session).startsWith(TASK_SESSION_PREFIX) && !session?.parentID)
       .filter((session) => {
         const directory = sessionDirectory(session);
         return !directory || directory === canonicalCwd;
@@ -1629,13 +2061,20 @@ export async function importExternalAgentSession(cwd, options = {}) {
   const versionOutput = versionResult.stdout || versionResult.stderr;
   // OpenCode 2.x moved `opencode import` and changed the session format.
   const versionInfo = parseOpencodeVersionInfo(versionOutput);
-  if (versionInfo && versionInfo.major > SUPPORTED_OPENCODE_MAJOR) {
+  if (versionInfo && !isSupportedOpencodeMajor(versionInfo.major)) {
     throw new Error(unsupportedOpencodeVersionMessage(versionInfo.version));
   }
   const version = parseOpenCodeVersion(versionOutput);
   const transcript = fs.readFileSync(options.sourcePath, "utf8");
-  const document = buildOpenCodeImportDocumentFromClaudeJsonl(transcript, {
-    cwd,
+  // 2.x moved import under `session` and takes typed message items (#55).
+  // --standalone imports through a private server: without it the 2.x CLI
+  // starts OpenCode's background service. The import resolves the project
+  // from its working directory.
+  const v2 = versionInfo?.major === 2;
+  const importCwd = v2 ? canonicalWorkspaceDirectory(cwd) : cwd;
+  const buildDocument = v2 ? buildOpenCodeV2ImportDocumentFromClaudeJsonl : buildOpenCodeImportDocumentFromClaudeJsonl;
+  const document = buildDocument(transcript, {
+    cwd: importCwd,
     version,
     idFactory: options.idFactory,
     fallbackTime: options.fallbackTime
@@ -1645,8 +2084,9 @@ export async function importExternalAgentSession(cwd, options = {}) {
   const importPath = path.join(tempDir, "claude-session-import.json");
   try {
     writeJsonFile(importPath, document);
-    const importResult = runCommandChecked("opencode", ["import", importPath], {
-      cwd,
+    const importArgs = v2 ? ["session", "import", "--standalone", importPath] : ["import", importPath];
+    const importResult = runCommandChecked("opencode", importArgs, {
+      cwd: importCwd,
       env: options.env,
       maxBuffer: 1024 * 1024 * 10
     });

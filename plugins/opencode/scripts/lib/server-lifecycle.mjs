@@ -6,8 +6,20 @@ import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
 
-import { OpencodeServerClient } from "./opencode-server.mjs";
-import { commandLineLooksLikeOpencodeServe, readProcessCommandLine } from "./process.mjs";
+import { lockIsStale, readLockOwner, releaseLock, stealStaleLock, tryCreateLock } from "./lock-dir.mjs";
+import {
+  OpencodeServerClient,
+  isSupportedOpencodeMajor,
+  parseOpencodeVersionInfo,
+  unsupportedOpencodeVersionError
+} from "./opencode-server.mjs";
+import { OpencodeV2Client } from "./opencode-server-v2.mjs";
+import {
+  commandLineLooksLikeOpencodeServe,
+  findListeningPid,
+  readProcessCommandLine,
+  terminateProcessTree
+} from "./process.mjs";
 import { atomicWriteFile, resolveStateDir } from "./state.mjs";
 
 export const SERVER_URL_ENV = "OPENCODE_COMPANION_SERVER_URL";
@@ -22,7 +34,6 @@ const OWNED_SERVER_USERNAME = "opencode";
 
 const SERVER_STATE_FILE = "server.json";
 const SERVER_LOCK_DIR = "server.lock";
-const SERVER_LOCK_INFO_FILE = "owner.json";
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const DEFAULT_LOCK_STALE_MS = 30000;
 const DEFAULT_LOCK_POLL_MS = 100;
@@ -97,30 +108,74 @@ async function withTimeout(fn, timeoutMs) {
   }
 }
 
-export async function isServerHealthy(url, timeoutMs = 500, credentials = {}) {
+// Which server API a running server speaks: 1.x answers /global/health with
+// JSON, 2.x serves its web UI there and reports itself on /api/info. Throws
+// when neither answers, keeping the 1.x error unless /api/info rejected the
+// credentials or named an unsupported version.
+// Probes ask the server to close their connection (issue #71). Right after a
+// probe, ensureServer runs PowerShell on Windows, and spawnSync blocks the
+// event loop for seconds: a keep-alive socket the probe left in fetch's pool
+// went stale meanwhile (the server closes it after 5s idle), and the next
+// request, POST /session, failed with ECONNRESET.
+async function probeServerApi(url, credentials, signal) {
+  let v1Error;
+  try {
+    await new OpencodeServerClient(url, credentials).health({ signal, closeConnection: true });
+    return 1;
+  } catch (error) {
+    if (error?.status === 401 || error?.code === "OPENCODE_UNSUPPORTED_VERSION") {
+      throw error;
+    }
+    v1Error = error;
+  }
+  try {
+    // Report the major the /api/* server claims, so the callers' gate refuses
+    // one the plugin doesn't support (a later 3.x) at once and by name.
+    const info = await new OpencodeV2Client(url, credentials).info({ signal, closeConnection: true });
+    const versionInfo = parseOpencodeVersionInfo(info?.version);
+    if (!versionInfo || versionInfo.major < 2) {
+      throw new Error("OpenCode GET /api/info did not report a 2.x or later version.");
+    }
+    return versionInfo.major;
+  } catch (error) {
+    // 2.x serves its retired 1.x routes without auth, so a missing or wrong
+    // password only shows up here.
+    throw error?.status === 401 || error?.code === "OPENCODE_UNSUPPORTED_VERSION" ? error : v1Error;
+  }
+}
+
+export async function detectServerApi(url, timeoutMs = 500, credentials = {}) {
   const normalized = normalizeUrl(url);
   if (!normalized) {
-    return false;
+    return null;
   }
-
   try {
-    const client = new OpencodeServerClient(normalized, credentials);
-    await withTimeout((signal) => client.health({ signal }), timeoutMs);
-    return true;
+    return await withTimeout((signal) => probeServerApi(normalized, credentials, signal), timeoutMs);
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function isServerHealthy(url, timeoutMs = 500, credentials = {}) {
+  return (await detectServerApi(url, timeoutMs, credentials)) !== null;
 }
 
 async function waitForServerHealth(url, timeoutMs = 10000, credentials = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await isServerHealthy(url, 500, credentials)) {
-      return true;
+    const api = await detectServerApi(url, 500, credentials);
+    if (api !== null) {
+      return api;
     }
     await sleep(100);
   }
-  return false;
+  return null;
+}
+
+function assertSupportedServerApi(api) {
+  if (!isSupportedOpencodeMajor(api)) {
+    throw unsupportedOpencodeVersionError(`${api}.x`);
+  }
 }
 
 function processIsAlive(pid) {
@@ -136,83 +191,14 @@ function processIsAlive(pid) {
   }
 }
 
-function readServerLockInfo(lockDir) {
-  const infoFile = path.join(lockDir, SERVER_LOCK_INFO_FILE);
-  try {
-    return JSON.parse(fs.readFileSync(infoFile, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function serverLockAgeMs(lockDir, info) {
-  const created = Date.parse(info?.createdAt ?? "");
-  if (Number.isFinite(created)) {
-    return Date.now() - created;
-  }
-
-  try {
-    return Date.now() - fs.statSync(lockDir).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-
-function isServerLockStale(lockDir, staleMs) {
-  if (!fs.existsSync(lockDir)) {
-    return true;
-  }
-
-  const info = readServerLockInfo(lockDir);
-  const ownerPid = Number(info?.pid);
-  if (processIsAlive(ownerPid) === false) {
-    return true;
-  }
-
-  // Age is only a backstop for zombie/reused PIDs where liveness is unreliable;
-  // staleMs (default 30s) is well past normal startup (timeoutMs default 10s),
-  // and the atomic steal bounds any misfire against a live owner to one winner.
-  return serverLockAgeMs(lockDir, info) > staleMs;
-}
-
-function removeServerLock(lockDir) {
-  try {
-    fs.rmSync(lockDir, { recursive: true, force: true });
-  } catch {
-    // Another process may have removed or replaced the lock.
-  }
-}
-
-function stealStaleServerLock(lockDir) {
-  // Atomically move the stale lock aside instead of removing it in place.
-  // renameSync has a single winner, so concurrent stealers cannot all clear the
-  // path — a blind remove could delete a lock another process just created. The
-  // winner deletes the moved copy; losers get ENOENT and re-race the atomic
-  // mkdir. Residual: a lock refreshed within the rename window could be moved,
-  // which is rare and costs at most one orphaned local server.
-  const stealPath = `${lockDir}.stale-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  try {
-    fs.renameSync(lockDir, stealPath);
-  } catch {
-    return;
-  }
-  removeServerLock(stealPath);
-}
-
-function releaseServerLock(lockDir, token) {
-  const info = readServerLockInfo(lockDir);
-  if (info?.token !== token) {
-    return;
-  }
-  removeServerLock(lockDir);
-}
-
 async function loadHealthyServerSession(cwd, healthTimeoutMs) {
   const existing = loadServerSession(cwd);
-  if (existing?.url && (await isServerHealthy(existing.url, healthTimeoutMs, serverSessionCredentials(existing)))) {
-    return existing;
+  if (!existing?.url) {
+    return null;
   }
-  return null;
+  // Records written before 2.x support carry no `api`; the probe fills it in.
+  const api = await detectServerApi(existing.url, healthTimeoutMs, serverSessionCredentials(existing));
+  return api === null ? null : { ...existing, api };
 }
 
 function createServerLease(options = {}) {
@@ -280,40 +266,21 @@ async function acquireServerLock(cwd, options = {}) {
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   for (;;) {
-    try {
-      fs.mkdirSync(lockDir);
-    } catch (error) {
-      if (error?.code !== "EEXIST") {
-        throw error;
-      }
-
-      // If the holder looks stale, clear it via an atomic single-winner steal
-      // (never a blind remove), then re-race the mkdir.
-      if (isServerLockStale(lockDir, staleMs)) {
-        stealStaleServerLock(lockDir);
-      }
-      if (deadline != null && Date.now() >= deadline) {
-        return null;
-      }
-      await sleep(deadline == null ? pollMs : Math.min(pollMs, Math.max(1, deadline - Date.now())));
-      continue;
+    if (tryCreateLock(lockDir, token)) {
+      return {
+        release: () => releaseLock(lockDir, token)
+      };
     }
-
-    // We own the freshly created lock dir; record ownership. If that write
-    // fails, remove the dir so we do not leak an unowned lock others wait out.
-    try {
-      fs.writeFileSync(
-        path.join(lockDir, SERVER_LOCK_INFO_FILE),
-        `${JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }, null, 2)}\n`,
-        "utf8"
-      );
-    } catch (error) {
-      removeServerLock(lockDir);
-      throw error;
+    // Steal only the lock that was judged stale; a lock taken again after we
+    // looked is put back, never deleted (issue #68).
+    const owner = readLockOwner(lockDir);
+    if (lockIsStale(lockDir, owner, staleMs)) {
+      stealStaleLock(lockDir, owner.token);
     }
-    return {
-      release: () => releaseServerLock(lockDir, token)
-    };
+    if (deadline != null && Date.now() >= deadline) {
+      return null;
+    }
+    await sleep(deadline == null ? pollMs : Math.min(pollMs, Math.max(1, deadline - Date.now())));
   }
 }
 
@@ -371,17 +338,25 @@ function killServerPid(pid, killProcess = null) {
     return;
   }
 
+  if (process.platform === "win32") {
+    // The server's own tree: OpenCode can run helpers below it.
+    try {
+      terminateProcessTree(pid);
+    } catch {
+      // Ignore already-exited processes.
+    }
+    return;
+  }
+
   try {
     process.kill(pid, "SIGTERM");
   } catch {
     // Ignore already-exited processes.
   }
-  if (process.platform !== "win32") {
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch {
-      // Ignore missing process groups.
-    }
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    // Ignore missing process groups.
   }
 }
 
@@ -396,9 +371,13 @@ export async function ensureServer(cwd, options = {}) {
       password: envSource[SERVER_PASSWORD_ENV] || null,
       username: envSource[SERVER_USERNAME_ENV] || undefined
     };
+    let api;
     try {
-      const client = new OpencodeServerClient(overrideUrl, credentials);
-      await withTimeout((signal) => client.health({ signal }), options.healthTimeoutMs ?? 1000);
+      api = await withTimeout(
+        (signal) => probeServerApi(overrideUrl, credentials, signal),
+        options.healthTimeoutMs ?? 1000
+      );
+      assertSupportedServerApi(api);
     } catch (error) {
       if (error?.status === 401) {
         throw new Error(
@@ -414,6 +393,7 @@ export async function ensureServer(cwd, options = {}) {
       url: overrideUrl,
       pid: null,
       external: true,
+      api,
       password: credentials.password,
       username: credentials.username ?? null
     };
@@ -426,7 +406,7 @@ export async function ensureServer(cwd, options = {}) {
 
   try {
     const lockedExisting = await loadHealthyServerSession(cwd, options.healthTimeoutMs ?? 500);
-    if (lockedExisting) {
+    if (lockedExisting && isSupportedOpencodeMajor(lockedExisting.api)) {
       const leasedExisting = addServerLease(lockedExisting, options);
       saveServerSession(cwd, leasedExisting);
       return leasedExisting;
@@ -434,7 +414,7 @@ export async function ensureServer(cwd, options = {}) {
 
     const staleExisting = loadServerSession(cwd);
     if (staleExisting) {
-      const { url, pidFile, logFile, sessionDir, pid, external, password, username, port } = staleExisting;
+      const { url, pidFile, logFile, sessionDir, pid, external, password, username, port, api } = staleExisting;
       // The server lock is already held here; intentionally omit cwd so teardown
       // uses the unlocked path even if the persisted session schema grows.
       await teardownServerSession({
@@ -447,6 +427,7 @@ export async function ensureServer(cwd, options = {}) {
         password,
         username,
         port,
+        api,
         killProcess: options.killProcess ?? null,
         readProcessCommandLineImpl: options.readProcessCommandLineImpl ?? null
       });
@@ -471,38 +452,53 @@ export async function ensureServer(cwd, options = {}) {
       env: options.env ?? process.env,
       password
     });
-    // Recorded for forensics (compare against the live command line when an
-    // identity-mismatch teardown skip is investigated); verification itself
-    // matches the LIVE command line against `opencode serve --port <port>`.
-    const pidCommandLine = readProcessCommandLine(child.pid, options);
-
-    const ready = await waitForServerHealth(url, options.timeoutMs ?? 10000, {
+    const api = await waitForServerHealth(url, options.timeoutMs ?? 10000, {
       password,
       username: OWNED_SERVER_USERNAME
     });
+    // On Windows the server starts behind a shell (its .cmd shim needs one), so
+    // the child is the shell, and under Git Bash that shell is gone once the
+    // server runs. Record the process listening on the port instead: teardown
+    // verifies and stops that one (issue #65).
+    const serverPid = (api !== null ? findListeningPid(port, options) : null) ?? child.pid ?? null;
+    if (pidFile && serverPid && serverPid !== child.pid) {
+      fs.writeFileSync(pidFile, `${serverPid}\n`, "utf8");
+    }
+    // Recorded for forensics (compare against the live command line when an
+    // identity-mismatch teardown skip is investigated); verification itself
+    // matches the LIVE command line against `opencode serve --port <port>`.
+    const pidCommandLine = readProcessCommandLine(serverPid, options);
+    // A server the plugin cannot drive is torn down like one that never came up.
+    const ready = api !== null && isSupportedOpencodeMajor(api);
     if (!ready) {
       await teardownServerSession({
         url,
         pidFile,
         logFile,
         sessionDir,
-        pid: child.pid ?? null,
+        pid: serverPid,
         password,
         username: OWNED_SERVER_USERNAME,
         port,
+        api,
         killProcess: options.killProcess ?? null,
         readProcessCommandLineImpl: options.readProcessCommandLineImpl ?? null
       });
+      if (api !== null) {
+        throw unsupportedOpencodeVersionError(`${api}.x`);
+      }
       return null;
     }
 
     const session = {
       url,
-      pid: child.pid ?? null,
+      pid: serverPid,
+      ...(serverPid !== child.pid ? { spawnPid: child.pid ?? null } : {}),
       pidFile,
       logFile,
       sessionDir,
       external: false,
+      api,
       password,
       username: OWNED_SERVER_USERNAME,
       port,
@@ -558,9 +554,11 @@ async function teardownServerSessionUnlocked({
   username = null,
   killProcess = null,
   port = null,
+  api = null,
   readProcessCommandLineImpl = null
 } = {}) {
-  if (url && !external) {
+  // 2.x has no /global routes; its teardown is the PID kill alone.
+  if (url && !external && api !== 2) {
     try {
       const client = new OpencodeServerClient(url, { password, username: username ?? undefined });
       // Dispose only cleans up instance state; on 1.17.15 it does NOT stop the
@@ -633,6 +631,7 @@ export async function teardownServerSession({
   username = null,
   killProcess = null,
   port = null,
+  api = null,
   readProcessCommandLineImpl = null
 } = {}) {
   if (!cwd) {
@@ -647,6 +646,7 @@ export async function teardownServerSession({
       username,
       killProcess,
       port,
+      api,
       readProcessCommandLineImpl
     });
   }
@@ -684,6 +684,7 @@ export async function teardownServerSession({
       username: session?.username ?? username,
       killProcess,
       port: session?.port ?? port,
+      api: session?.api ?? api,
       readProcessCommandLineImpl
     };
     const result = await teardownServerSessionUnlocked(teardownTarget);

@@ -13,9 +13,17 @@ export class OpencodeHttpError extends Error {
   }
 }
 
-// The plugin drives OpenCode's 1.x server API. OpenCode 2.x replaced it with a
-// new /api/* surface, and its retired 1.x routes fall through to the web UI.
+// The plugin drives OpenCode's 1.x server API, and 2.x's new /api/* surface
+// through a separate client (issue #46). 2.x support is experimental: it is
+// tested against a real 2.x server on macOS only. A later major stays
+// unsupported until it is checked. Every "is this major usable?" decision
+// goes through here.
 export const SUPPORTED_OPENCODE_MAJOR = 1;
+export const EXPERIMENTAL_OPENCODE_MAJOR = 2;
+
+export function isSupportedOpencodeMajor(major) {
+  return major === SUPPORTED_OPENCODE_MAJOR || major === EXPERIMENTAL_OPENCODE_MAJOR;
+}
 
 // `opencode --version` prints "1.18.34" on 1.x and "opencode v2.0.20" on 2.x;
 // the /global/health body carries the bare version.
@@ -26,10 +34,33 @@ export function parseOpencodeVersionInfo(text) {
 
 export function unsupportedOpencodeVersionMessage(version) {
   return (
-    `OpenCode ${version} is not supported yet: this plugin uses the OpenCode 1.x server API, which OpenCode 2.x replaced. ` +
-    "Install the OpenCode 1.x line (`npm install -g opencode-ai`, or OpenCode's Homebrew tap " +
-    "`anomalyco/tap/opencode` after uninstalling the core `opencode` formula), then rerun `/opencode:setup`."
+    `OpenCode ${version} is not supported yet: this plugin supports OpenCode 1.x, and 2.x experimentally. ` +
+    "Install a supported version (`npm install -g opencode-ai` installs 1.x), then rerun `/opencode:setup`."
   );
+}
+
+export function unsupportedOpencodeVersionError(version) {
+  const error = new Error(unsupportedOpencodeVersionMessage(version));
+  error.code = "OPENCODE_UNSUPPORTED_VERSION";
+  return error;
+}
+
+// fetch() reports every network failure as just "fetch failed"; its cause
+// says what happened (refused, reset, timed out). Keep it in the message, and
+// keep the error a plain transport error: callers treat those differently
+// from HTTP rejections. Aborts pass through unchanged.
+export async function fetchWithCause(fetchImpl, url, init, label) {
+  try {
+    return await fetchImpl(url, init);
+  } catch (error) {
+    const detail = error?.cause?.code ?? error?.cause?.message ?? null;
+    if (error?.name === "AbortError" || init?.signal?.aborted || !detail || String(error?.message).includes(detail)) {
+      throw error;
+    }
+    const wrapped = new Error(`OpenCode ${label} failed: ${error.message} (${detail})`, { cause: error });
+    wrapped.code = error.cause?.code ?? null;
+    throw wrapped;
+  }
 }
 
 function trimBaseUrl(url) {
@@ -50,7 +81,7 @@ export function buildBasicAuthHeader(credentials = {}) {
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
-function encodePathSegment(value) {
+export function encodePathSegment(value) {
   return encodeURIComponent(String(value));
 }
 
@@ -75,7 +106,7 @@ function parseBodyText(text, contentType = "") {
   }
 }
 
-function requestWithFreshConnection(url, options = {}) {
+export function requestWithFreshConnection(url, options = {}) {
   const transport = url.protocol === "https:" ? https : http;
   const body = options.body == null ? null : JSON.stringify(options.body);
   const requestTimeoutMs = Math.max(
@@ -292,12 +323,17 @@ export class OpencodeServerClient {
       ...this.authHeaders(),
       ...(options.headers ?? {})
     };
-    const response = await this.fetch(url, {
-      method,
-      headers,
-      body: options.body == null ? undefined : JSON.stringify(options.body),
-      signal: options.signal
-    });
+    const response = await fetchWithCause(
+      this.fetch,
+      url,
+      {
+        method,
+        headers,
+        body: options.body == null ? undefined : JSON.stringify(options.body),
+        signal: options.signal
+      },
+      `${method} ${path}`
+    );
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -378,7 +414,10 @@ export class OpencodeServerClient {
   }
 
   async health(options = {}) {
-    const body = await this.request("GET", "/global/health", { signal: options.signal });
+    const body = await this.request("GET", "/global/health", {
+      signal: options.signal,
+      headers: options.closeConnection ? { connection: "close" } : undefined
+    });
     // OpenCode 1.x answers {"healthy":true,"version":"..."}. OpenCode 2.x serves
     // its web UI (HTML, HTTP 200) on this retired route, so anything else is not
     // a server this plugin can drive.
@@ -387,7 +426,12 @@ export class OpencodeServerClient {
     }
     const versionInfo = parseOpencodeVersionInfo(body.version);
     if (versionInfo && versionInfo.major > SUPPORTED_OPENCODE_MAJOR) {
-      throw new Error(unsupportedOpencodeVersionMessage(versionInfo.version));
+      // 2.x speaks the /api/* surface, which the 2.x client probes next; only
+      // a major the plugin doesn't support ends the probe here.
+      if (isSupportedOpencodeMajor(versionInfo.major)) {
+        throw new Error(`OpenCode GET /global/health reported ${versionInfo.version}, which is not a 1.x server.`);
+      }
+      throw unsupportedOpencodeVersionError(versionInfo.version);
     }
     return body;
   }
@@ -421,42 +465,47 @@ export class OpencodeServerClient {
       throw new Error("OpenCode event stream did not include a response body.");
     }
 
-    let reader;
-    try {
-      options.onOpen?.();
-      reader = response.body.getReader();
-    } catch (error) {
-      if (reader) {
-        await reader.cancel().catch(() => {});
-        try {
-          reader.releaseLock();
-        } catch {
-          // Preserve the original onOpen/getReader failure.
-        }
-      } else {
-        await response.body.cancel().catch(() => {});
-      }
-      throw error;
-    }
-    const decoder = new TextDecoder();
-    let buffer = "";
+    return consumeEventStream(response, onEvent, options);
+  }
+}
 
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        buffer += decoder.decode(value, { stream: true });
-        buffer = await dispatchSseBlocks(buffer, onEvent);
+// Shared by the 1.x and 2.x clients: both servers stream `data:` blocks.
+export async function consumeEventStream(response, onEvent, options = {}) {
+  let reader;
+  try {
+    options.onOpen?.();
+    reader = response.body.getReader();
+  } catch (error) {
+    if (reader) {
+      await reader.cancel().catch(() => {});
+      try {
+        reader.releaseLock();
+      } catch {
+        // Preserve the original onOpen/getReader failure.
       }
-
-      buffer += decoder.decode();
-      if (buffer.trim()) {
-        await dispatchSseBlocks(`${buffer}\n\n`, onEvent);
-      }
-    } finally {
-      reader.releaseLock();
+    } else {
+      await response.body.cancel().catch(() => {});
     }
+    throw error;
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      buffer = await dispatchSseBlocks(buffer, onEvent);
+    }
+
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      await dispatchSseBlocks(`${buffer}\n\n`, onEvent);
+    }
+  } finally {
+    reader.releaseLock();
   }
 }

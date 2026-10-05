@@ -4,9 +4,11 @@ on:
   pull_request:
   # pull_request runs test the PR head, not the merge commit that lands on
   # main — and main is what the community-marketplace catalog pins. Test it
-  # directly on every push.
+  # directly on every push. Release branches (release/1.1.0 and later) collect
+  # a milestone's PRs before one release PR to main, so test what lands there
+  # too.
   push:
-    branches: [main]
+    branches: [main, "release/**"]
 
 permissions:
   contents: read

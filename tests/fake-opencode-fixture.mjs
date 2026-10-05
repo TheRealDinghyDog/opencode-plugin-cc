@@ -13,9 +13,23 @@ export function buildEnv(binDir, extra = {}) {
   };
 }
 
+// The fake servers rewrite this file in place, so a test polling it while a
+// server is running can read it half-written: retry briefly before failing.
 export function readFakeState(binDir) {
   const statePath = path.join(binDir, "fake-opencode-state.json");
-  return fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : null;
+  for (let attempt = 0; ; attempt += 1) {
+    if (!fs.existsSync(statePath)) {
+      return null;
+    }
+    try {
+      return JSON.parse(fs.readFileSync(statePath, "utf8"));
+    } catch (error) {
+      if (!(error instanceof SyntaxError) || attempt >= 20) {
+        throw error;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
 }
 
 export function readServerBootCount(binDir) {
@@ -265,6 +279,17 @@ async function handleMessage(req, res, sessionID) {
   // assistant text ("provider-error") or after partial text
   // ("provider-error-after-text"), like a real 1.18 server.
   const providerFailMode = process.env.FAKE_OPENCODE_MESSAGE_FAIL;
+  // Like DeepSeek's thinking mode on 1.18 (#90): a model that refuses the
+  // forced StructuredOutput tool call behind a json_schema format.
+  const refusesStructured =
+    process.env.FAKE_OPENCODE_REJECT_STRUCTURED === "1" && body && body.format && body.format.type === "json_schema";
+  if (refusesStructured) {
+    const error = { name: "APIError", data: { message: "Thinking mode does not support this tool_choice (request_id: fake)" } };
+    emit("session.error", { sessionID, error });
+    emit("session.idle", { sessionID });
+    sendJson(res, { info: Object.assign({}, info, { error }), parts: [] });
+    return;
+  }
   if (providerFailMode === "provider-error" || providerFailMode === "provider-error-after-text") {
     if (providerFailMode === "provider-error-after-text") {
       emit("message.part.updated", {
@@ -303,6 +328,19 @@ async function handleMessage(req, res, sessionID) {
       always: ["/outside/workspace/secret.txt"],
       tool: { messageID, callID: "call_edit_1" }
     });
+    if (process.env.FAKE_OPENCODE_SECOND_PERMISSION_GONE === "1") {
+      // A second request in the same step. Like a real 1.18 server (#63), it
+      // is dropped once the first is rejected: replying to it gets 404.
+      emit("permission.asked", {
+        id: permissionID + "_gone",
+        sessionID,
+        permission: "external_directory",
+        patterns: ["/outside/other/*"],
+        metadata: {},
+        always: ["/outside/other/*"],
+        tool: { messageID, callID: "call_edit_2" }
+      });
+    }
     const reply = await waitForPermission(permissionID);
     if (reply && reply.response !== "reject") {
       emit("file.edited", { file: "/outside/workspace/secret.txt" });
@@ -351,9 +389,14 @@ async function handleMessage(req, res, sessionID) {
     });
   }
 
-  const finalText = prompt.includes("follow up")
-    ? "Resumed the prior OpenCode run.\\nFollow-up prompt accepted."
-    : "Handled the requested task.\\nTask prompt accepted.";
+  // A schema asked for in the prompt text (the #90 fallback) gets a matching
+  // JSON object as the reply.
+  const promptSchema = (prompt.match(/<output_schema>\\n([\\s\\S]*?)\\n<\\/output_schema>/) || [])[1];
+  const finalText = promptSchema
+    ? JSON.stringify(exampleForSchema(JSON.parse(promptSchema), "result"))
+    : prompt.includes("follow up")
+      ? "Resumed the prior OpenCode run.\\nFollow-up prompt accepted."
+      : "Handled the requested task.\\nTask prompt accepted.";
   const parts = (structuredOutputParts(body) || [{ type: "text", text: finalText }]).map((part, index) => ({
     id: "prt_" + messageID + "_" + index,
     sessionID,
@@ -544,8 +587,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "POST" && url.pathname === "/global/dispose") {
-    sendJson(res, { ok: true });
-    setTimeout(() => server.close(() => process.exit(0)), 10);
+    // Like a real 1.x server: dispose cleans up instance state but does NOT
+    // stop the listener, so teardown has to stop the process itself. The
+    // fixture used to exit here, which hid a Windows teardown leak (#65).
+    sendJson(res, true);
     return;
   }
 
@@ -685,6 +730,10 @@ const server = http.createServer(async (req, res) => {
     const state = loadState();
     state.permissions.push({ sessionID, permissionID, body });
     saveState(state);
+    if (permissionID.endsWith("_gone")) {
+      sendJson(res, { name: "NotFoundError", data: { message: "Permission request not found" } }, 404);
+      return;
+    }
     const resolve = pendingPermissions.get(permissionID);
     pendingPermissions.delete(permissionID);
     resolve?.(body);

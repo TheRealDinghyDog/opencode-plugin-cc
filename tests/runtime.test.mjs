@@ -396,6 +396,34 @@ test("stop review gate blocks when the enabled OpenCode reviewer is unavailable"
   });
 });
 
+test("stop review gate names the supported versions when OpenCode is an unsupported major", () => {
+  const workspace = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+  const env = buildTestEnv(binDir, {
+    CLAUDE_PLUGIN_DATA: pluginDataDir,
+    OPENCODE_COMPANION_SESSION_ID: "sess-current",
+    FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0"
+  });
+
+  return withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, () => {
+    saveState(workspace, { version: 1, config: { stopReviewGate: true }, jobs: [] });
+    const result = run(process.execPath, [STOP_HOOK], {
+      cwd: workspace,
+      env,
+      input: JSON.stringify({ cwd: workspace, session_id: env.OPENCODE_COMPANION_SESSION_ID })
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, "block");
+    assert.match(decision.reason, /OpenCode 3\.0\.0 is not supported yet: this plugin supports OpenCode 1\.x, and 2\.x/);
+    assert.match(decision.reason, /--disable-review-gate/);
+    assert.doesNotMatch(decision.reason, /ensure `opencode --version` works/);
+  });
+});
+
 test("stop review gate tears down a server left by a failed stop review task", { skip: LOCAL_LISTEN_SKIP }, async () => {
   const workspace = makeTempDir();
   const binDir = makeTempDir();
@@ -422,7 +450,10 @@ test("stop review gate tears down a server left by a failed stop review task", {
     });
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).decision, "block");
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, "block");
+    // When the review task never reached OpenCode, say why (the gate's reason).
+    assert.ok(readFakeState(binDir)?.lastMessage, `the stop review never reached OpenCode: ${decision.reason}`);
     assert.match(readFakeState(binDir).lastMessage.prompt, /Run a stop-gate review of the previous Claude turn/);
     assert.equal(loadServerSession(workspace), null);
   });
@@ -1415,6 +1446,64 @@ test("adversarial-review prompt uses the adversarial-review.md template", { skip
   }
 });
 
+// Issue #90: a model that refuses OpenCode 1.x's forced structured-output
+// tool call (DeepSeek's thinking mode) still gets a review, from the JSON in
+// its reply.
+test("a 1.x review falls back to JSON in the reply when the model refuses the forced tool call", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "before\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "README.md"), "after\n");
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_REJECT_STRUCTURED: "1" });
+
+  try {
+    const result = run("node", [SCRIPT, "review", "--json"], { cwd: repo, env });
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.deepEqual(payload.result, { verdict: "approve", summary: "summary value", findings: [], next_steps: [] });
+
+    const messages = readFakeState(binDir).messages;
+    assert.equal(messages.length, 2);
+    assert.equal(messages[0].body.format.type, "json_schema");
+    assert.equal(messages[1].body.format, undefined);
+    assert.match(messages[1].prompt, /<output_schema>[\s\S]*"next_steps"[\s\S]*<\/output_schema>/);
+    assert.equal(messages[1].sessionID, messages[0].sessionID);
+
+    // Without --json, the progress says why the review asked again.
+    const rendered = run("node", [SCRIPT, "review"], { cwd: repo, env });
+    assert.match(`${rendered.stdout}${rendered.stderr}`, /refused OpenCode's structured-output tool call \(Thinking mode does not support this tool_choice/);
+    assert.match(rendered.stdout, /Verdict: approve|approve/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("a 1.x review failing for another reason gets no fallback", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "before\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "README.md"), "after\n");
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "provider-error" });
+
+  try {
+    const result = run("node", [SCRIPT, "review", "--json"], { cwd: repo, env });
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.result, null);
+    assert.match(payload.parseError ?? "", /fake-model is not supported/);
+    assert.equal(readFakeState(binDir).messages.length, 1);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
 test("review prompt uses the neutral review.md template", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
@@ -1584,11 +1673,11 @@ test("a review whose provider fails reports the error, not the review prompt", {
   }
 });
 
-test("setup rejects an OpenCode 2.x CLI without starting a server", { skip: LOCAL_LISTEN_SKIP }, () => {
+test("setup rejects an unsupported OpenCode major without starting a server", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
-  const env = buildTestEnv(binDir, { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20" });
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0" });
 
   try {
     const result = run("node", [SCRIPT, "setup", "--json"], { cwd: repo, env });
@@ -1597,8 +1686,8 @@ test("setup rejects an OpenCode 2.x CLI without starting a server", { skip: LOCA
     assert.equal(payload.ready, false);
     assert.equal(payload.opencode.available, false);
     assert.equal(payload.opencode.unsupported, true);
-    assert.equal(payload.opencode.version, "2.0.20");
-    assert.match(payload.opencode.detail, /OpenCode 2\.0\.20 is not supported yet/);
+    assert.equal(payload.opencode.version, "3.0.0");
+    assert.match(payload.opencode.detail, /OpenCode 3\.0\.0 is not supported yet/);
     assert.match(payload.opencode.detail, /npm install -g opencode-ai/);
     assert.ok(payload.nextSteps.some((step) => /not supported yet/.test(step)));
     assert.equal(readServerBootCount(binDir), 0);
@@ -1607,29 +1696,29 @@ test("setup rejects an OpenCode 2.x CLI without starting a server", { skip: LOCA
   }
 });
 
-test("a task on an OpenCode 2.x CLI fails with the unsupported-version message", { skip: LOCAL_LISTEN_SKIP }, () => {
+test("a task on an unsupported OpenCode major fails with the unsupported-version message", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
   initCommittedRepo(repo);
-  const env = buildTestEnv(binDir, { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20" });
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0" });
 
   try {
     const result = run("node", [SCRIPT, "task", "check the fixture"], { cwd: repo, env });
     assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}\n${result.stderr}`, /OpenCode 2\.0\.20 is not supported yet/);
+    assert.match(`${result.stdout}\n${result.stderr}`, /OpenCode 3\.0\.0 is not supported yet/);
     assert.equal(readServerBootCount(binDir), 0);
   } finally {
     cleanupServer(repo, env);
   }
 });
 
-test("an external server bypasses the local OpenCode 2.x CLI gate", async () => {
+test("an external server bypasses the local CLI's unsupported-major gate", async () => {
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
   const workspace = makeTempDir();
   await withProcessEnv(
-    { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`, FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20" },
+    { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`, FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0" },
     async () => {
       const { getOpencodeAvailability } = await import("../plugins/opencode/scripts/lib/opencode.mjs");
       const local = getOpencodeAvailability(workspace, {});
@@ -1658,4 +1747,29 @@ test("SessionStart exports this plugin's data directory under its own name, not 
   // Other plugins' hooks write CLAUDE_PLUGIN_DATA to the same file; this hook
   // must not overwrite theirs.
   assert.doesNotMatch(exported, /^export CLAUDE_PLUGIN_DATA=/m);
+});
+
+// Issue #63: once one permission request of a step is rejected, OpenCode
+// drops the others, and rejecting those too gets 404. That must not fail
+// the turn.
+test("a permission reply that finds the request gone does not fail the turn", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_SECOND_PERMISSION_GONE: "1" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--write", "check the fixture"], { cwd: repo, env });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Handled the requested task/);
+    assert.match(result.stderr, /was no longer pending \(HTTP 404\); nothing left to reject/);
+    const replies = readFakeState(binDir).permissions.map((entry) => entry.body.response);
+    assert.deepEqual(replies, ["reject", "reject"]);
+  } finally {
+    cleanupServer(repo, env);
+  }
 });

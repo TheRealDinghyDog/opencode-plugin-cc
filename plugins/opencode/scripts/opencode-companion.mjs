@@ -192,7 +192,17 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     );
   }
   if (opencodeStatus.available && !authStatus.loggedIn) {
-    nextSteps.push("Configure an OpenCode provider, then rerun `/opencode:setup`.");
+    nextSteps.push(
+      opencodeStatus.experimental
+        ? "Log in to a provider with `opencode auth login <provider>`, then rerun `/opencode:setup`."
+        : "Configure an OpenCode provider, then rerun `/opencode:setup`."
+    );
+  }
+  const notes = [];
+  if (opencodeStatus.experimental) {
+    notes.push(
+      "OpenCode 2.x support is experimental. 2.x keeps its own logins, separate from OpenCode 1.x and the desktop app: if a provider rejects requests, log in again with `opencode auth login <provider>`."
+    );
   }
   if (!config.stopReviewGate) {
     nextSteps.push(
@@ -209,7 +219,8 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
     reviewGateEnabled: Boolean(config.stopReviewGate),
     actionsTaken,
-    nextSteps
+    nextSteps,
+    notes
   };
 }
 
@@ -285,7 +296,7 @@ function findLatestResumableTaskJob(jobs) {
       (job) =>
         job.jobClass === "task" &&
         job.threadId &&
-        job.status === "completed"
+        (job.status === "completed" || job.phase === "awaiting-answer")
     ) ?? null
   );
 }
@@ -441,6 +452,7 @@ async function executeTaskRun(request) {
       rawOutput,
       failureMessage,
       failed: result.status !== 0,
+      question: result.question ?? null,
       reasoningSummary: result.reasoningSummary
     },
     {
@@ -454,7 +466,8 @@ async function executeTaskRun(request) {
     threadId: result.threadId,
     rawOutput,
     touchedFiles: result.touchedFiles,
-    reasoningSummary: result.reasoningSummary
+    reasoningSummary: result.reasoningSummary,
+    ...(result.question ? { question: result.question } : {})
   };
 
   return {
@@ -467,7 +480,8 @@ async function executeTaskRun(request) {
     jobTitle: taskMetadata.title,
     jobClass: "task",
     write: Boolean(request.write),
-    serverUrl: result.serverUrl ?? null
+    serverUrl: result.serverUrl ?? null,
+    awaitingAnswer: Boolean(result.question)
   };
 }
 

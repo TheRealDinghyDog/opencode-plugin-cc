@@ -1,0 +1,820 @@
+{
+ "name": "interrupt",
+ "sid": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+ "outcome": "session.execution.interrupted",
+ "promptStatus": 200,
+ "events": [
+  {
+   "id": "evt_109a5ab8f001RcGo27vtKXRoqn",
+   "created": 1791163214735,
+   "type": "session.created",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "slug": "silent-eagle",
+    "version": "2.0.20",
+    "projectID": "13151c8c8424fa29eeb087a4e13b35ff288512c8",
+    "location": {
+     "directory": "/tmp/workspace"
+    },
+    "subpath": "",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 0,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5ab93002o4vqvkVwWUoBNE",
+   "created": 1791163214739,
+   "type": "session.inbox.enqueued",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "inboxID": "msg_109a5ab93001FLvx8ykEa4whNw",
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "item": {
+     "type": "user",
+     "payload": {
+      "text": "Write the numbers from 1 to 400 as words, one per line. Do not use tools."
+     },
+     "delivery": "steer"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 1,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5ab9400195Aq46XP73AC21",
+   "created": 1791163214740,
+   "type": "session.execution.started",
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 2,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5ab98001zQr5kLBbt8k16B",
+   "created": 1791163214744,
+   "metadata": {
+    "instructions": {
+     "initial": true
+    }
+   },
+   "type": "session.instructions.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "delta": {
+     "core/codemode": "616a7ad8b8e40e8a71eab238dfbbe9eaf0f4a9e6fdad853226d075bfe602e1e6",
+     "core/skill-guidance": "59bf307ea999cd149e77936c3e695752fa23949e3a3c63c50515568bb71b0c99",
+     "core/date": "5c3ade85f6455ad46661f59c7b66a8fa997d86a35616f652f28ff2e8c891b5aa",
+     "core/environment": "082ac38002abbfb592ac43676869dfa19d1be705b8b5cbdee6b95eb8b4a486be"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 3,
+    "version": 2
+   }
+  },
+  {
+   "id": "evt_109a5ab99001eLrqVl08WLIUky",
+   "created": 1791163214745,
+   "type": "session.inbox.delivered",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "inboxID": "msg_109a5ab93001FLvx8ykEa4whNw"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 4,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5b076001TpjHbifuVKisAK",
+   "created": 1791163215990,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "cost": 4.2944e-05,
+    "tokens": {
+     "input": 27,
+     "output": 7,
+     "reasoning": 0,
+     "cache": {
+      "read": 512,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a5b0770015eY1QDBwhyGgEa",
+   "created": 1791163215991,
+   "type": "session.renamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "title": "Numbers 1 to 400 List"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 6,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5b11400170gixJaa1JbYcn",
+   "created": 1791163216148,
+   "type": "session.step.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "started": 1791163214787
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 7,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5b117001DzAB2EKrxXZ8ZV",
+   "created": 1791163216151,
+   "type": "session.text.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 8,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5b17f0012dtKl9kOaWYL9H",
+   "created": 1791163216255,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "1"
+   }
+  },
+  {
+   "id": "evt_109a5b246001SvfTqk5KL0OmJp",
+   "created": 1791163216454,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": ". one\n2. two\n3. three\n4. four\n5. five\n6. six\n7. seven\n8. eight\n9. nine\n10. ten\n11"
+   }
+  },
+  {
+   "id": "evt_109a5b2bf001PjrGYqkMiluoWT",
+   "created": 1791163216575,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": ". eleven\n12. twelve\n13. thirteen\n14. fourteen\n15. fifteen\n16. sixteen\n17"
+   }
+  },
+  {
+   "id": "evt_109a5b328001HUyzcp4cnmHh2M",
+   "created": 1791163216680,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": ". seventeen\n18. eighteen\n19. nineteen\n20. twenty\n21. twenty-one\n22. twenty-two"
+   }
+  },
+  {
+   "id": "evt_109a5b395001LNpZtMTkYM33Hd",
+   "created": 1791163216789,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n23. twenty-three\n24. twenty-four\n25. twenty-five\n26. twenty-six\n27. twenty"
+   }
+  },
+  {
+   "id": "evt_109a5b454001T0WX483DRW6Xuh",
+   "created": 1791163216980,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "-seven\n28. twenty-eight\n29. twenty-nine\n30. thirty\n31. thirty-one\n32. thirty-two\n33. thirty-three\n34. thirty-four\n35. thirty-five\n36"
+   }
+  },
+  {
+   "id": "evt_109a5b4c70016mANVri7J1I08J",
+   "created": 1791163217095,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": ". thirty-six\n37. thirty-seven\n38. thirty-eight\n39. thirty-nine"
+   }
+  },
+  {
+   "id": "evt_109a5b52f001HFetiI0LALU6rP",
+   "created": 1791163217199,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n40. forty\n41. forty-one\n42. forty-two\n43. forty-three\n44. forty-four\n45. forty-five"
+   }
+  },
+  {
+   "id": "evt_109a5b5a5001PHplLwb4XaKBSN",
+   "created": 1791163217317,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n46. forty-six\n47. forty-seven\n48. forty-eight\n49. forty-nine\n50. fifty"
+   }
+  },
+  {
+   "id": "evt_109a5b65f001tit34rZ0BWgazf",
+   "created": 1791163217503,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n51. fifty-one\n52. fifty-two\n53. fifty-three\n54. fifty-four\n55. fifty-five\n56. fifty-six\n57. fifty-seven\n58. fifty-eight\n59."
+   }
+  },
+  {
+   "id": "evt_109a5b6d700184PudbhfzrUQUp",
+   "created": 1791163217623,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": " fifty-nine\n60. sixty\n61. sixty-one\n62. sixty-two\n63. sixty-three\n64."
+   }
+  },
+  {
+   "id": "evt_109a5b747001p77Ohsa6ai29Uu",
+   "created": 1791163217735,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": " sixty-four\n65. sixty-five\n66. sixty-six\n67. sixty-seven\n68. sixty-eight\n69"
+   }
+  },
+  {
+   "id": "evt_109a5b7b7001wZmgaXUhzOZNUo",
+   "created": 1791163217847,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": ". sixty-nine\n70. seventy\n71. seventy-one\n72. seventy-two\n73. seventy-three\n74"
+   }
+  },
+  {
+   "id": "evt_109a5b86b001hORjJhzumLxUYZ",
+   "created": 1791163218027,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": ". seventy-four\n75. seventy-five\n76. seventy-six\n77. seventy-seven\n78. seventy-eight\n79. seventy-nine\n80. eighty\n81. eighty"
+   }
+  },
+  {
+   "id": "evt_109a5b8d2001Zr0luh0nW2h4oY",
+   "created": 1791163218130,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "-one\n82. eighty-two\n83. eighty-three\n84. eighty-four\n85. eighty-five\n86."
+   }
+  },
+  {
+   "id": "evt_109a5b942001vcWveJsu6Zq9ga",
+   "created": 1791163218242,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": " eighty-six\n87. eighty-seven\n88. eighty-eight\n89. eighty-nine\n90. ninety\n91."
+   }
+  },
+  {
+   "id": "evt_109a5b9b2001CM4gvxFd1Hrt0L",
+   "created": 1791163218355,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": " ninety-one\n92. ninety-two\n93. ninety-three\n94. ninety-four\n95. ninety-five\n96"
+   }
+  },
+  {
+   "id": "evt_109a5ba7a001BOep2R4sZ0L3Ml",
+   "created": 1791163218554,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": ". ninety-six\n97. ninety-seven\n98. ninety-eight\n99. ninety-nine\n100. one hundred\n101. one hundred one\n102. one hundred two\n103. one hundred three"
+   }
+  },
+  {
+   "id": "evt_109a5baeb001lMzBiGy5M7tngX",
+   "created": 1791163218668,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n104. one hundred four\n105. one hundred five\n106. one hundred six"
+   }
+  },
+  {
+   "id": "evt_109a5bb66001F6y5TlKnkrpDHt",
+   "created": 1791163218790,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n107. one hundred seven\n108. one hundred eight\n109. one hundred nine\n110. one hundred ten\n111. one hundred eleven"
+   }
+  },
+  {
+   "id": "evt_109a5bbce0012K0MjYlaqWW09K",
+   "created": 1791163218895,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n112. one hundred twelve\n113. one hundred thirteen\n114. one hundred fourteen\n115. one hundred fifteen"
+   }
+  },
+  {
+   "id": "evt_109a5bc84001sFgi3t2b0tgb01",
+   "created": 1791163219076,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n116. one hundred sixteen\n117. one hundred seventeen\n118. one hundred eighteen\n119. one hundred nineteen\n120. one hundred twenty\n121. one hundred twenty-one\n122. one hundred"
+   }
+  },
+  {
+   "id": "evt_109a5bcf6001X44HQFSZe5xJ60",
+   "created": 1791163219190,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": " twenty-two\n123. one hundred twenty-three\n124. one hundred twenty-four\n125. one hundred twenty-five"
+   }
+  },
+  {
+   "id": "evt_109a5bd65001yiOWnmymFSc4y0",
+   "created": 1791163219302,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n126. one hundred twenty-six\n127. one hundred twenty-seven\n128. one hundred twenty-eight\n129. one"
+   }
+  },
+  {
+   "id": "evt_109a5bdd6001oLNndWy6Jz6LH0",
+   "created": 1791163219414,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": " hundred twenty-nine\n130. one hundred thirty\n131. one hundred thirty-one\n132. one hundred thirty-two"
+   }
+  },
+  {
+   "id": "evt_109a5be8e0013tJS6xvFE3LWKT",
+   "created": 1791163219598,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n133. one hundred thirty-three\n134. one hundred thirty-four\n135. one hundred thirty-five\n136. one hundred thirty-six\n137. one hundred thirty-seven\n138. one hundred thirty-eight"
+   }
+  },
+  {
+   "id": "evt_109a5bf07001S4ZlrfaNl6V6zA",
+   "created": 1791163219719,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n139. one hundred thirty-nine\n140. one hundred forty\n141. one hundred forty-one\n142. one hundred"
+   }
+  },
+  {
+   "id": "evt_109a5bf77001GiFa5aR2AEpZ9n",
+   "created": 1791163219831,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": " forty-two\n143. one hundred forty-three\n144. one hundred forty-four\n145. one hundred forty-five"
+   }
+  },
+  {
+   "id": "evt_109a5bfe6001PMZO9dKpfyThMj",
+   "created": 1791163219942,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n146. one hundred forty-six\n147. one hundred forty-seven\n148. one hundred forty-eight\n149. one"
+   }
+  },
+  {
+   "id": "evt_109a5c09e001UWyqvLP36kQTFh",
+   "created": 1791163220126,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": " hundred forty-nine\n150. one hundred fifty\n151. one hundred fifty-one\n152. one hundred fifty-two\n153. one hundred fifty-three\n154. one hundred fifty-four\n155. one hundred"
+   }
+  },
+  {
+   "id": "evt_109a5c11b001FyEjx6B6r4t0FQ",
+   "created": 1791163220251,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": " fifty-five\n156. one hundred fifty-six\n157. one hundred fifty-seven\n158. one hundred fifty-eight"
+   }
+  },
+  {
+   "id": "evt_109a5c1910010127O8QxxAye42",
+   "created": 1791163220369,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n159. one hundred fifty-nine\n160. one hundred sixty\n161. one hundred sixty-one\n162. one"
+   }
+  },
+  {
+   "id": "evt_109a5c2020011HApd7E6Gs1k5I",
+   "created": 1791163220482,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": " hundred sixty-two\n163. one hundred sixty-three\n164. one hundred sixty-four"
+   }
+  },
+  {
+   "id": "evt_109a5c2aa001lm6DfDvhO8kQSY",
+   "created": 1791163220650,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": "\n165. one hundred sixty-five\n166. one hundred sixty-six\n167. one hundred sixty-seven\n168. one hundred sixty-eight\n169. one hundred sixty-nine\n170. one hundred seventy\n171"
+   }
+  },
+  {
+   "id": "evt_109a5c3130017yHGPby4XwjHQm",
+   "created": 1791163220755,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "delta": ". one hundred seventy-one\n172. one hundred seventy-two\n173. one hundred seventy-three\n174. one hundred"
+   }
+  },
+  {
+   "id": "evt_109a5c314001mrPxTkuMEYpjxJ",
+   "created": 1791163220756,
+   "type": "session.text.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "ordinal": 0,
+    "text": "1. one\n2. two\n3. three\n4. four\n5. five\n6. six\n7. seven\n8. eight\n9. nine\n10. ten\n11. eleven\n12. twelve\n13. thirteen\n14. fourteen\n15. fifteen\n16. sixteen\n17. seventeen\n18. eighteen\n19. nineteen\n20. twenty\n21. twenty-one\n22. twenty-two\n23. twenty-three\n24. twenty-four\n25. twenty-five\n26. twenty-six\n27. twenty-seven\n28. twenty-eight\n29. twenty-nine\n30. thirty\n31. thirty-one\n32. thirty-two\n33. thirty-three\n34. thirty-four\n35. thirty-five\n36. thirty-six\n37. thirty-seven\n38. thirty-eight\n39. thirty-nine\n40. forty\n41. forty-one\n42. forty-two\n43. forty-three\n44. forty-four\n45. forty-five\n46. forty-six\n47. forty-seven\n48. forty-eight\n49. forty-nine\n50. fifty\n51. fifty-one\n52. fifty-two\n53. fifty-three\n54. fifty-four\n55. fifty-five\n56. fifty-six\n57. fifty-seven\n58. fifty-eight\n59. fifty-nine\n60. sixty\n61. sixty-one\n62. sixty-two\n63. sixty-three\n64. sixty-four\n65. sixty-five\n66. sixty-six\n67. sixty-seven\n68. sixty-eight\n69. sixty-nine\n70. seventy\n71. seventy-one\n72. seventy-two\n73. seventy-three\n74. seventy-four\n75. seventy-five\n76. seventy-six\n77. seventy-seven\n78. seventy-eight\n79. seventy-nine\n80. eighty\n81. eighty-one\n82. eighty-two\n83. eighty-three\n84. eighty-four\n85. eighty-five\n86. eighty-six\n87. eighty-seven\n88. eighty-eight\n89. eighty-nine\n90. ninety\n91. ninety-one\n92. ninety-two\n93. ninety-three\n94. ninety-four\n95. ninety-five\n96. ninety-six\n97. ninety-seven\n98. ninety-eight\n99. ninety-nine\n100. one hundred\n101. one hundred one\n102. one hundred two\n103. one hundred three\n104. one hundred four\n105. one hundred five\n106. one hundred six\n107. one hundred seven\n108. one hundred eight\n109. one hundred nine\n110. one hundred ten\n111. one hundred eleven\n112. one hundred twelve\n113. one hundred thirteen\n114. one hundred fourteen\n115. one hundred fifteen\n116. one hundred sixteen\n117. one hundred seventeen\n118. one hundred eighteen\n119. one hundred nineteen\n120. one hundred twenty\n121. one hundred twenty-one\n122. one hundred twenty-two\n123. one hundred twenty-three\n124. one hundred twenty-four\n125. one hundred twenty-five\n126. one hundred twenty-six\n127. one hundred twenty-seven\n128. one hundred twenty-eight\n129. one hundred twenty-nine\n130. one hundred thirty\n131. one hundred thirty-one\n132. one hundred thirty-two\n133. one hundred thirty-three\n134. one hundred thirty-four\n135. one hundred thirty-five\n136. one hundred thirty-six\n137. one hundred thirty-seven\n138. one hundred thirty-eight\n139. one hundred thirty-nine\n140. one hundred forty\n141. one hundred forty-one\n142. one hundred forty-two\n143. one hundred forty-three\n144. one hundred forty-four\n145. one hundred forty-five\n146. one hundred forty-six\n147. one hundred forty-seven\n148. one hundred forty-eight\n149. one hundred forty-nine\n150. one hundred fifty\n151. one hundred fifty-one\n152. one hundred fifty-two\n153. one hundred fifty-three\n154. one hundred fifty-four\n155. one hundred fifty-five\n156. one hundred fifty-six\n157. one hundred fifty-seven\n158. one hundred fifty-eight\n159. one hundred fifty-nine\n160. one hundred sixty\n161. one hundred sixty-one\n162. one hundred sixty-two\n163. one hundred sixty-three\n164. one hundred sixty-four\n165. one hundred sixty-five\n166. one hundred sixty-six\n167. one hundred sixty-seven\n168. one hundred sixty-eight\n169. one hundred sixty-nine\n170. one hundred seventy\n171. one hundred seventy-one\n172. one hundred seventy-two\n173. one hundred seventy-three\n174. one hundred"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 9,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5c3160013NUTG67LovKm6S",
+   "created": 1791163220758,
+   "type": "session.step.streamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 10,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5c33d001XZxprEc8yADLkp",
+   "created": 1791163220797,
+   "type": "session.step.failed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "assistantMessageID": "msg_109a5aba1001bS66ekncuEYd6k",
+    "error": {
+     "type": "aborted",
+     "message": "Step interrupted"
+    },
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "files": []
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 11,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5c33f001qjwnWcYoIJWoaa",
+   "created": 1791163220799,
+   "type": "session.execution.interrupted",
+   "data": {
+    "sessionID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "reason": "user"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a54a0ffei6E5a0BOYSIILE",
+    "seq": 12,
+    "version": 1
+   }
+  }
+ ],
+ "messages": {
+  "data": [
+   {
+    "id": "msg_109a5c33f001qjwnWcYoIJWoaa",
+    "time": {
+     "created": 1791163220799
+    },
+    "type": "idle",
+    "outcome": "interrupted"
+   },
+   {
+    "id": "msg_109a5aba1001bS66ekncuEYd6k",
+    "time": {
+     "created": 1791163214787,
+     "streamed": 1791163220758,
+     "completed": 1791163220797
+    },
+    "type": "assistant",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "content": [
+     {
+      "type": "text",
+      "text": "1. one\n2. two\n3. three\n4. four\n5. five\n6. six\n7. seven\n8. eight\n9. nine\n10. ten\n11. eleven\n12. twelve\n13. thirteen\n14. fourteen\n15. fifteen\n16. sixteen\n17. seventeen\n18. eighteen\n19. nineteen\n20. twenty\n21. twenty-one\n22. twenty-two\n23. twenty-three\n24. twenty-four\n25. twenty-five\n26. twenty-six\n27. twenty-seven\n28. twenty-eight\n29. twenty-nine\n30. thirty\n31. thirty-one\n32. thirty-two\n33. thirty-three\n34. thirty-four\n35. thirty-five\n36. thirty-six\n37. thirty-seven\n38. thirty-eight\n39. thirty-nine\n40. forty\n41. forty-one\n42. forty-two\n43. forty-three\n44. forty-four\n45. forty-five\n46. forty-six\n47. forty-seven\n48. forty-eight\n49. forty-nine\n50. fifty\n51. fifty-one\n52. fifty-two\n53. fifty-three\n54. fifty-four\n55. fifty-five\n56. fifty-six\n57. fifty-seven\n58. fifty-eight\n59. fifty-nine\n60. sixty\n61. sixty-one\n62. sixty-two\n63. sixty-three\n64. sixty-four\n65. sixty-five\n66. sixty-six\n67. sixty-seven\n68. sixty-eight\n69. sixty-nine\n70. seventy\n71. seventy-one\n72. seventy-two\n73. seventy-three\n74. seventy-four\n75. seventy-five\n76. seventy-six\n77. seventy-seven\n78. seventy-eight\n79. seventy-nine\n80. eighty\n81. eighty-one\n82. eighty-two\n83. eighty-three\n84. eighty-four\n85. eighty-five\n86. eighty-six\n87. eighty-seven\n88. eighty-eight\n89. eighty-nine\n90. ninety\n91. ninety-one\n92. ninety-two\n93. ninety-three\n94. ninety-four\n95. ninety-five\n96. ninety-six\n97. ninety-seven\n98. ninety-eight\n99. ninety-nine\n100. one hundred\n101. one hundred one\n102. one hundred two\n103. one hundred three\n104. one hundred four\n105. one hundred five\n106. one hundred six\n107. one hundred seven\n108. one hundred eight\n109. one hundred nine\n110. one hundred ten\n111. one hundred eleven\n112. one hundred twelve\n113. one hundred thirteen\n114. one hundred fourteen\n115. one hundred fifteen\n116. one hundred sixteen\n117. one hundred seventeen\n118. one hundred eighteen\n119. one hundred nineteen\n120. one hundred twenty\n121. one hundred twenty-one\n122. one hundred twenty-two\n123. one hundred twenty-three\n124. one hundred twenty-four\n125. one hundred twenty-five\n126. one hundred twenty-six\n127. one hundred twenty-seven\n128. one hundred twenty-eight\n129. one hundred twenty-nine\n130. one hundred thirty\n131. one hundred thirty-one\n132. one hundred thirty-two\n133. one hundred thirty-three\n134. one hundred thirty-four\n135. one hundred thirty-five\n136. one hundred thirty-six\n137. one hundred thirty-seven\n138. one hundred thirty-eight\n139. one hundred thirty-nine\n140. one hundred forty\n141. one hundred forty-one\n142. one hundred forty-two\n143. one hundred forty-three\n144. one hundred forty-four\n145. one hundred forty-five\n146. one hundred forty-six\n147. one hundred forty-seven\n148. one hundred forty-eight\n149. one hundred forty-nine\n150. one hundred fifty\n151. one hundred fifty-one\n152. one hundred fifty-two\n153. one hundred fifty-three\n154. one hundred fifty-four\n155. one hundred fifty-five\n156. one hundred fifty-six\n157. one hundred fifty-seven\n158. one hundred fifty-eight\n159. one hundred fifty-nine\n160. one hundred sixty\n161. one hundred sixty-one\n162. one hundred sixty-two\n163. one hundred sixty-three\n164. one hundred sixty-four\n165. one hundred sixty-five\n166. one hundred sixty-six\n167. one hundred sixty-seven\n168. one hundred sixty-eight\n169. one hundred sixty-nine\n170. one hundred seventy\n171. one hundred seventy-one\n172. one hundred seventy-two\n173. one hundred seventy-three\n174. one hundred"
+     }
+    ],
+    "snapshot": {
+     "start": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "end": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "files": []
+    },
+    "finish": "error",
+    "error": {
+     "type": "aborted",
+     "message": "Step interrupted"
+    }
+   },
+   {
+    "id": "msg_109a5ab93001FLvx8ykEa4whNw",
+    "time": {
+     "created": 1791163214745
+    },
+    "text": "Write the numbers from 1 to 400 as words, one per line. Do not use tools.",
+    "type": "user"
+   }
+  ],
+  "cursor": {
+   "previous": "eyJpZCI6Im1zZ18xMDlhNWMzM2YwMDFxanduV2NZb0lKV29hYSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+   "next": "eyJpZCI6Im1zZ18xMDlhNWFiOTMwMDFGTHZ4OHlrRWE0d2hOdyIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+  }
+ },
+ "permissions": {
+  "data": []
+ },
+ "forms": {
+  "data": []
+ }
+}

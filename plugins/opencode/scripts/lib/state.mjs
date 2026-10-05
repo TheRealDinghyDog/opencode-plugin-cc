@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { lockIsStale, readLockOwner, releaseLock, stealStaleLock, tryCreateLock } from "./lock-dir.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
 
 const STATE_VERSION = 1;
@@ -15,7 +16,6 @@ const FALLBACK_STATE_ROOT_DIR = path.join(os.tmpdir(), "opencode-companion");
 const STATE_FILE_NAME = "state.json";
 const JOBS_DIR_NAME = "jobs";
 const STATE_LOCK_DIR_NAME = "state.lock";
-const LOCK_INFO_FILE = "owner.json";
 const MAX_JOBS = 50;
 const DEFAULT_LOCK_STALE_MS = 30000;
 const DEFAULT_LOCK_POLL_MS = 25;
@@ -72,80 +72,6 @@ export function ensureStateDir(cwd) {
   fs.mkdirSync(resolveJobsDir(cwd), { recursive: true });
 }
 
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return null;
-  }
-
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === "EPERM";
-  }
-}
-
-function readLockInfo(lockDir) {
-  const infoFile = path.join(lockDir, LOCK_INFO_FILE);
-  try {
-    return JSON.parse(fs.readFileSync(infoFile, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function lockAgeMs(lockDir, info) {
-  const created = Date.parse(info?.createdAt ?? "");
-  if (Number.isFinite(created)) {
-    return Date.now() - created;
-  }
-
-  try {
-    return Date.now() - fs.statSync(lockDir).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-
-function isStateLockStale(lockDir, staleMs) {
-  if (!fs.existsSync(lockDir)) {
-    return true;
-  }
-
-  const info = readLockInfo(lockDir);
-  if (processIsAlive(Number(info?.pid)) === false) {
-    return true;
-  }
-
-  return lockAgeMs(lockDir, info) > staleMs;
-}
-
-function removeStateLock(lockDir) {
-  try {
-    fs.rmSync(lockDir, { recursive: true, force: true });
-  } catch {
-    // Another process may have removed or replaced the lock.
-  }
-}
-
-function stealStaleStateLock(lockDir) {
-  const stalePath = `${lockDir}.stale-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  try {
-    fs.renameSync(lockDir, stalePath);
-  } catch {
-    return;
-  }
-  removeStateLock(stalePath);
-}
-
-function releaseStateLock(lockDir, token) {
-  const info = readLockInfo(lockDir);
-  if (info?.token !== token) {
-    return;
-  }
-  removeStateLock(lockDir);
-}
-
 function stateLockOptions(cwd, options = {}) {
   const stateDir = resolveStateDir(cwd);
   fs.mkdirSync(stateDir, { recursive: true });
@@ -168,30 +94,15 @@ function lockAcquisitionDeadline(options) {
 }
 
 function tryAcquireStateLock(lockDir, staleMs, token) {
-  try {
-    fs.mkdirSync(lockDir);
-  } catch (error) {
-    if (error?.code !== "EEXIST") {
-      throw error;
-    }
-    if (isStateLockStale(lockDir, staleMs)) {
-      stealStaleStateLock(lockDir);
-    }
-    return null;
+  if (tryCreateLock(lockDir, token)) {
+    return () => releaseLock(lockDir, token);
   }
-
-  try {
-    fs.writeFileSync(
-      path.join(lockDir, LOCK_INFO_FILE),
-      `${JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }, null, 2)}\n`,
-      "utf8"
-    );
-  } catch (error) {
-    removeStateLock(lockDir);
-    throw error;
+  // Steal only the lock that was judged stale (issue #68).
+  const owner = readLockOwner(lockDir);
+  if (lockIsStale(lockDir, owner, staleMs)) {
+    stealStaleLock(lockDir, owner.token);
   }
-
-  return () => releaseStateLock(lockDir, token);
+  return null;
 }
 
 function acquireStateLock(cwd, options = {}) {

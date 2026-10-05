@@ -7,9 +7,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { ensureServer, isServerHealthy, loadServerSession, saveServerSession, teardownServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+import {
+  detectServerApi,
+  ensureServer,
+  isServerHealthy,
+  loadServerSession,
+  saveServerSession,
+  teardownServerSession
+} from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+import { installFakeOpencode } from "./fake-opencode-fixture.mjs";
 import { resolveStateDir } from "../plugins/opencode/scripts/lib/state.mjs";
-import { commandLineLooksLikeOpencodeServe } from "../plugins/opencode/scripts/lib/process.mjs";
+import { commandLineLooksLikeOpencodeServe, readProcessCommandLine } from "../plugins/opencode/scripts/lib/process.mjs";
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {
@@ -734,6 +742,95 @@ test(
         /Configured OpenCode server is not healthy: .*did not return an OpenCode 1\.x health response/
       );
     } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+);
+
+// Claude Code runs commands through Git Bash on Windows, which sets SHELL;
+// the PR workflow's Windows job does not, so this recreates it (issue #65).
+const GIT_BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
+
+test(
+  "on Windows under Git Bash, session teardown stops the server it started (issue #65)",
+  {
+    skip:
+      process.platform !== "win32"
+        ? "Windows only"
+        : !fs.existsSync(GIT_BASH)
+          ? "Git Bash is not installed"
+          : LOCAL_LISTEN_AVAILABLE
+            ? false
+            : "local 127.0.0.1 listen is unavailable in this sandbox"
+  },
+  async () => {
+    const previous = { SHELL: process.env.SHELL, CLAUDE_PLUGIN_DATA: process.env.CLAUDE_PLUGIN_DATA };
+    process.env.SHELL = GIT_BASH;
+    process.env.CLAUDE_PLUGIN_DATA = makeTempDir("opencode-plugin-data-");
+    try {
+      const binDir = makeTempDir();
+      installFakeOpencode(binDir);
+      const workspace = makeTempDir();
+      const env = {
+        ...process.env,
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        FAKE_OPENCODE_STATE_PATH: path.join(binDir, "fake-opencode-state.json")
+      };
+
+      const server = await ensureServer(workspace, { env });
+      assert.ok(server?.url, "server started");
+      // The recorded PID is the server listening on the port, not the shell.
+      assert.match(readProcessCommandLine(server.pid) ?? "", /serve/);
+
+      const result = await teardownServerSession({ cwd: workspace, force: true });
+      assert.equal(result.killSkipped, undefined, result.diagnostic);
+      const credentials = { password: server.password, username: server.username };
+      let alive = true;
+      for (let attempt = 0; attempt < 50 && alive; attempt += 1) {
+        alive = await isServerHealthy(server.url, 300, credentials);
+        if (alive) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      assert.equal(alive, false, "the server stops at teardown");
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  }
+);
+
+// Issue #71: on Windows, ensureServer runs PowerShell (spawnSync, which
+// blocks the event loop) right after the health probe. A keep-alive socket
+// the probe left in fetch's pool went stale meanwhile, and the next request,
+// POST /session, failed with ECONNRESET. Probes must not leave one behind.
+test(
+  "server probes leave no pooled connection open",
+  { skip: LOCAL_LISTEN_AVAILABLE ? false : "local 127.0.0.1 listen is unavailable in this sandbox" },
+  async () => {
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ healthy: true, version: "1.17.15" }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${server.address().port}`;
+    const openConnections = () => new Promise((resolve) => server.getConnections((error, count) => resolve(count)));
+
+    try {
+      assert.equal(await detectServerApi(url, 2000), 1);
+      let open = await openConnections();
+      for (let attempt = 0; attempt < 20 && open > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        open = await openConnections();
+      }
+      assert.equal(open, 0, "the probe's connection is closed, not pooled");
+    } finally {
+      server.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));
     }
   }

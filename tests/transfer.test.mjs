@@ -4,9 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { buildOpenCodeImportDocumentFromClaudeJsonl } from "../plugins/opencode/scripts/lib/claude-session-transfer.mjs";
+import {
+  buildOpenCodeImportDocumentFromClaudeJsonl,
+  buildOpenCodeV2ImportDocumentFromClaudeJsonl
+} from "../plugins/opencode/scripts/lib/claude-session-transfer.mjs";
 import { importExternalAgentSession } from "../plugins/opencode/scripts/lib/opencode.mjs";
 import { buildEnv, installFakeOpencode, readFakeState } from "./fake-opencode-fixture.mjs";
+import { installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
 import { makeTempDir, run } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -243,7 +247,7 @@ test("importExternalAgentSession returns the imported session when temp cleanup 
   }
 });
 
-test("transfer refuses an OpenCode 2.x CLI before importing anything", () => {
+test("transfer refuses an unsupported OpenCode major before importing anything", () => {
   const repo = makeTempDir();
   const home = makeTempDir("opencode-plugin-home-");
   const binDir = makeTempDir();
@@ -258,11 +262,104 @@ test("transfer refuses an OpenCode 2.x CLI before importing anything", () => {
     HOME: home,
     USERPROFILE: home,
     OPENCODE_COMPANION_TRANSCRIPT_PATH: transcriptPath,
-    FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20"
+    FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0"
   });
   const result = run("node", [SCRIPT, "transfer"], { cwd: repo, env });
 
   assert.notEqual(result.status, 0);
-  assert.match(`${result.stdout}\n${result.stderr}`, /OpenCode 2\.0\.20 is not supported yet/);
+  assert.match(`${result.stdout}\n${result.stderr}`, /OpenCode 3\.0\.0 is not supported yet/);
   assert.equal(readFakeState(binDir)?.imports?.length ?? 0, 0);
+});
+
+const V2_CONTRACT = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "opencode-v2-contract.json"), "utf8"));
+
+// Issue #55: OpenCode 2.x imports typed message items, and its schemas reject
+// unknown keys, so each item carries exactly the keys recorded from a real
+// 2.0.20 session.
+test("Claude JSONL converts to an OpenCode 2.x import document", () => {
+  const document = buildOpenCodeV2ImportDocumentFromClaudeJsonl(sampleClaudeJsonl(), {
+    cwd: "/repo",
+    idFactory: sequentialIds(),
+    fallbackTime: 1767225600500
+  });
+
+  assert.deepEqual(document.info, {
+    id: "ses_1",
+    projectID: "global",
+    title: "Investigate the failure",
+    agent: "build",
+    model: { id: "imported-transcript", providerID: "claude-code" },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1767225600000, updated: 1767225600501 },
+    location: { directory: "/repo" }
+  });
+  assert.deepEqual(
+    document.messages.map((message) => [message.type, message.text ?? message.content[0].text]),
+    [
+      ["user", "Investigate the failure"],
+      ["assistant", "The bug is in parser."],
+      ["user", "Please fix\nand test"],
+      ["assistant", "Fixed and tested."]
+    ]
+  );
+  for (const message of document.messages) {
+    assert.deepEqual(Object.keys(message).sort(), [...V2_CONTRACT.messages[message.type]].sort());
+  }
+  const times = document.messages.map((message) => message.time.created);
+  assert.deepEqual(times, [...times].sort((left, right) => left - right));
+  assert.equal(new Set(times).size, times.length);
+  assert.equal(new Set(document.messages.map((message) => message.id)).size, document.messages.length);
+});
+
+test("the 2.x converter keeps the 1.x rules: sidechains and leading assistant turns are dropped", () => {
+  const jsonl = [
+    JSON.stringify({ message: { role: "assistant", content: "orphaned before any user turn" } }),
+    JSON.stringify({ message: { role: "user", content: "main question" } }),
+    JSON.stringify({ isSidechain: true, message: { role: "assistant", content: "subagent chatter" } }),
+    JSON.stringify({ message: { role: "assistant", content: "main answer" } })
+  ].join("\n");
+  const document = buildOpenCodeV2ImportDocumentFromClaudeJsonl(jsonl, { cwd: "/repo", idFactory: sequentialIds() });
+  assert.deepEqual(
+    document.messages.map((message) => message.text ?? message.content[0].text),
+    ["main question", "main answer"]
+  );
+  assert.throws(
+    () => buildOpenCodeV2ImportDocumentFromClaudeJsonl(JSON.stringify({ type: "metadata" }), { cwd: "/repo" }),
+    /did not contain any importable/
+  );
+});
+
+test("transfer imports into OpenCode 2.x with session import --standalone (#55)", () => {
+  const repo = makeTempDir();
+  const home = makeTempDir("opencode-plugin-home-");
+  const binDir = makeTempDir();
+  installFakeOpencodeV2(binDir);
+
+  const claudeProjects = path.join(home, ".claude", "projects", "-tmp-project");
+  fs.mkdirSync(claudeProjects, { recursive: true });
+  const transcriptPath = path.join(claudeProjects, "session-123.jsonl");
+  fs.writeFileSync(transcriptPath, sampleClaudeJsonl(), "utf8");
+
+  const env = buildEnv(binDir, {
+    HOME: home,
+    USERPROFILE: home,
+    OPENCODE_COMPANION_TRANSCRIPT_PATH: transcriptPath
+  });
+  const result = run("node", [SCRIPT, "transfer", "--json"], { cwd: repo, env });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  const [imported] = readFakeState(binDir).imports;
+  // 2.x keeps the document's id, so the plugin must have made a fresh one.
+  assert.match(payload.threadId, /^ses_[0-9a-f]{18}$/);
+  assert.equal(imported.sessionID, payload.threadId);
+  assert.equal(payload.resumeCommand, `opencode --session ${payload.threadId}`);
+  assert.ok(imported.args.includes("--standalone"), imported.args.join(" "));
+  assert.equal(imported.cwd, fs.realpathSync.native(repo));
+  assert.equal(imported.document.info.location.directory, fs.realpathSync.native(repo));
+  assert.deepEqual(
+    imported.document.messages.map((message) => message.type),
+    ["user", "assistant", "user", "assistant"]
+  );
 });
