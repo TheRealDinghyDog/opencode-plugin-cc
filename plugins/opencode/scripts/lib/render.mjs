@@ -37,6 +37,21 @@ function validateReviewResultShape(data) {
   if (!Array.isArray(data.next_steps)) {
     return "Missing array `next_steps`.";
   }
+  // A finding without its text would render as an empty placeholder and lose
+  // what the reviewer said; show the raw reply instead (issue #89).
+  const incomplete = data.findings.findIndex(
+    (finding) =>
+      !finding ||
+      typeof finding !== "object" ||
+      Array.isArray(finding) ||
+      typeof finding.title !== "string" ||
+      !finding.title.trim() ||
+      typeof finding.body !== "string" ||
+      !finding.body.trim()
+  );
+  if (incomplete >= 0) {
+    return `Finding ${incomplete + 1} is not an object with a title and body.`;
+  }
   return null;
 }
 

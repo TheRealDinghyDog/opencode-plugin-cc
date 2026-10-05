@@ -1651,16 +1651,73 @@ export function extractJsonObject(text) {
   return null;
 }
 
+const SCHEMA_TYPES = {
+  object: (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value),
+  array: Array.isArray,
+  string: (value) => typeof value === "string",
+  integer: Number.isInteger,
+  number: (value) => typeof value === "number" && Number.isFinite(value),
+  boolean: (value) => typeof value === "boolean"
+};
+
+// 2.x checks no schema server-side, so a reply is validated here against the
+// keywords the plugin's schemas use (issue #89): type, required, properties,
+// items, enum, minLength, minimum, maximum. Extra keys are let through, as
+// they lose nothing. Returns the first problem, or null.
+function schemaViolation(value, schema, where = "the reply") {
+  if (!schema || typeof schema !== "object") {
+    return null;
+  }
+  if (schema.type && SCHEMA_TYPES[schema.type] && !SCHEMA_TYPES[schema.type](value)) {
+    return `${where} is not ${/^[aeiou]/.test(schema.type) ? "an" : "a"} ${schema.type}`;
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+    return `${where} is not one of ${schema.enum.map((option) => JSON.stringify(option)).join(", ")}`;
+  }
+  if (typeof value === "string" && Number.isInteger(schema.minLength) && value.trim().length < schema.minLength) {
+    return `${where} is empty`;
+  }
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      return `${where} is below ${schema.minimum}`;
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      return `${where} is above ${schema.maximum}`;
+    }
+  }
+  if (SCHEMA_TYPES.object(value)) {
+    const prefix = where === "the reply" ? "" : `${where}.`;
+    const missing = (Array.isArray(schema.required) ? schema.required : []).find((key) => !(key in value));
+    if (missing) {
+      return `${prefix || "the reply's "}"${missing}" is missing`;
+    }
+    for (const [key, property] of Object.entries(schema.properties ?? {})) {
+      if (key in value) {
+        const problem = schemaViolation(value[key], property, `${prefix}${key}`);
+        if (problem) {
+          return problem;
+        }
+      }
+    }
+  }
+  if (Array.isArray(value) && schema.items) {
+    for (const [index, item] of value.entries()) {
+      const problem = schemaViolation(item, schema.items, `${where}[${index}]`);
+      if (problem) {
+        return problem;
+      }
+    }
+  }
+  return null;
+}
+
 function parseStructuredReply(text, schema) {
   const value = extractJsonObject(text);
   if (!value) {
     return { value: null, problem: "no JSON object found" };
   }
-  const missing = (Array.isArray(schema?.required) ? schema.required : []).filter((key) => !(key in value));
-  if (missing.length > 0) {
-    return { value: null, problem: `missing ${missing.map((key) => `"${key}"`).join(", ")}` };
-  }
-  return { value, problem: null };
+  const problem = schemaViolation(value, schema);
+  return problem ? { value: null, problem } : { value, problem: null };
 }
 
 async function runV2Turn(cwd, client, server, options) {

@@ -426,6 +426,41 @@ test("a 2.x review sends the schema in the prompt and reads JSON out of the repl
   }
 });
 
+// Issue #89: findings given as strings passed the old top-level check and
+// rendered as "Finding 1 / No details provided.", losing what they said.
+const MALFORMED_REVIEW = { ...REVIEW, findings: ["Deleting the cache wipes user data on every start."] };
+
+test("a 2.x review with malformed findings gets one repair turn", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", {
+    FAKE_OPENCODE_V2_REPLY_SEQUENCE: JSON.stringify([JSON.stringify(MALFORMED_REVIEW), JSON.stringify(REVIEW)])
+  });
+  try {
+    changeReadme(ctx);
+    const result = companion(ctx, ["review", "--json"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).result, REVIEW);
+    const prompts = readFakeState(ctx.binDir).prompts;
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1].body.text, /findings\[0\] is not an object/);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("a 2.x review whose findings stay malformed is shown raw, never as empty findings", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const malformed = JSON.stringify(MALFORMED_REVIEW);
+  const ctx = setup("success", { FAKE_OPENCODE_V2_REPLY_SEQUENCE: JSON.stringify([malformed, malformed]) });
+  try {
+    changeReadme(ctx);
+    const result = companion(ctx, ["review"]);
+    assert.match(result.stdout, /unexpected review shape[\s\S]*Finding 1 is not an object with a title and body/);
+    assert.match(result.stdout, /Deleting the cache wipes user data on every start\./);
+    assert.doesNotMatch(result.stdout, /No details provided/);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
 test("a 2.x review that answers in prose gets one repair turn in the same session", { skip: LOCAL_LISTEN_SKIP }, () => {
   const ctx = setup("success", {
     FAKE_OPENCODE_V2_REPLY_SEQUENCE: JSON.stringify(["The change looks fine to me.", JSON.stringify(REVIEW)])
