@@ -7,7 +7,12 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 
 import { OpencodeServerClient } from "./opencode-server.mjs";
-import { commandLineLooksLikeOpencodeServe, readProcessCommandLine } from "./process.mjs";
+import {
+  commandLineLooksLikeOpencodeServe,
+  findListeningPid,
+  readProcessCommandLine,
+  terminateProcessTree
+} from "./process.mjs";
 import { atomicWriteFile, resolveStateDir } from "./state.mjs";
 
 export const SERVER_URL_ENV = "OPENCODE_COMPANION_SERVER_URL";
@@ -371,17 +376,25 @@ function killServerPid(pid, killProcess = null) {
     return;
   }
 
+  if (process.platform === "win32") {
+    // The server's own tree: OpenCode can run helpers below it.
+    try {
+      terminateProcessTree(pid);
+    } catch {
+      // Ignore already-exited processes.
+    }
+    return;
+  }
+
   try {
     process.kill(pid, "SIGTERM");
   } catch {
     // Ignore already-exited processes.
   }
-  if (process.platform !== "win32") {
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch {
-      // Ignore missing process groups.
-    }
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    // Ignore missing process groups.
   }
 }
 
@@ -471,22 +484,30 @@ export async function ensureServer(cwd, options = {}) {
       env: options.env ?? process.env,
       password
     });
-    // Recorded for forensics (compare against the live command line when an
-    // identity-mismatch teardown skip is investigated); verification itself
-    // matches the LIVE command line against `opencode serve --port <port>`.
-    const pidCommandLine = readProcessCommandLine(child.pid, options);
-
     const ready = await waitForServerHealth(url, options.timeoutMs ?? 10000, {
       password,
       username: OWNED_SERVER_USERNAME
     });
+    // On Windows the server starts behind a shell (its .cmd shim needs one), so
+    // the child is the shell, and under Git Bash that shell is gone once the
+    // server runs. Record the process listening on the port instead: teardown
+    // verifies and stops that one (issue #65).
+    const serverPid = (ready ? findListeningPid(port, options) : null) ?? child.pid ?? null;
+    if (pidFile && serverPid && serverPid !== child.pid) {
+      fs.writeFileSync(pidFile, `${serverPid}\n`, "utf8");
+    }
+    // Recorded for forensics (compare against the live command line when an
+    // identity-mismatch teardown skip is investigated); verification itself
+    // matches the LIVE command line against `opencode serve --port <port>`.
+    const pidCommandLine = readProcessCommandLine(serverPid, options);
+
     if (!ready) {
       await teardownServerSession({
         url,
         pidFile,
         logFile,
         sessionDir,
-        pid: child.pid ?? null,
+        pid: serverPid,
         password,
         username: OWNED_SERVER_USERNAME,
         port,
@@ -498,7 +519,8 @@ export async function ensureServer(cwd, options = {}) {
 
     const session = {
       url,
-      pid: child.pid ?? null,
+      pid: serverPid,
+      ...(serverPid !== child.pid ? { spawnPid: child.pid ?? null } : {}),
       pidFile,
       logFile,
       sessionDir,

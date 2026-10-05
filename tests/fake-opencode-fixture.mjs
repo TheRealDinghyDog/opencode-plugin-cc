@@ -544,8 +544,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "POST" && url.pathname === "/global/dispose") {
-    sendJson(res, { ok: true });
-    setTimeout(() => server.close(() => process.exit(0)), 10);
+    // Like a real 1.x server: dispose cleans up instance state but does NOT
+    // stop the listener, so teardown has to stop the process itself. The
+    // fixture used to exit here, which hid a Windows teardown leak (#65).
+    sendJson(res, true);
     return;
   }
 

@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 
-export function runCommand(command, args = [], options = {}) {
+function spawnCommand(command, args, options, shell) {
   const result = spawnSync(command, args, {
     cwd: options.cwd,
     env: options.env,
@@ -10,7 +10,7 @@ export function runCommand(command, args = [], options = {}) {
     input: options.input,
     maxBuffer: options.maxBuffer,
     stdio: options.stdio ?? "pipe",
-    shell: process.platform === "win32" ? (process.env.SHELL || true) : false,
+    shell,
     windowsHide: true
   });
 
@@ -23,6 +23,20 @@ export function runCommand(command, args = [], options = {}) {
     stderr: result.stderr ?? "",
     error: result.error ?? null
   };
+}
+
+// On Windows, commands like `opencode` and `npm` are .cmd shims that only a
+// shell can start.
+export function runCommand(command, args = [], options = {}) {
+  return spawnCommand(command, args, options, process.platform === "win32" ? process.env.SHELL || true : false);
+}
+
+// Real executables (powershell.exe, taskkill.exe) start without a shell. With
+// one, Node joins the arguments into a single unquoted string, and under Git
+// Bash (Windows' SHELL in Claude Code) the parentheses and quotes of a
+// PowerShell command break it (issue #65).
+export function runExecutable(command, args = [], options = {}) {
+  return spawnCommand(command, args, options, false);
 }
 
 export function runCommandChecked(command, args = [], options = {}) {
@@ -61,7 +75,7 @@ export function terminateProcessTree(pid, options = {}) {
   }
 
   const platform = options.platform ?? process.platform;
-  const runCommandImpl = options.runCommandImpl ?? runCommand;
+  const runCommandImpl = options.runCommandImpl ?? runExecutable;
   const killImpl = options.killImpl ?? process.kill.bind(process);
 
   if (platform === "win32") {
@@ -220,7 +234,7 @@ export function readProcessCommandLine(pid, options = {}) {
   }
 
   const platform = options.platform ?? process.platform;
-  const runCommandImpl = options.runCommandImpl ?? runCommand;
+  const runCommandImpl = options.runCommandImpl ?? runExecutable;
   const result =
     platform === "win32"
       ? runCommandImpl(
@@ -228,7 +242,7 @@ export function readProcessCommandLine(pid, options = {}) {
           [
             "-NoProfile",
             "-Command",
-            `(Get-CimInstance Win32_Process -Filter "ProcessId = ${Number(pid)}").CommandLine`
+            `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${Number(pid)}').CommandLine`
           ],
           {
             cwd: options.cwd,
@@ -245,6 +259,30 @@ export function readProcessCommandLine(pid, options = {}) {
   }
 
   return String(result.stdout ?? "").trim() || null;
+}
+
+// The PID that listens on a local TCP port, on Windows; elsewhere null. A
+// server started through a shell is not the shell's PID there (issue #65).
+export function findListeningPid(port, options = {}) {
+  const platform = options.platform ?? process.platform;
+  if (platform !== "win32" || !Number.isInteger(Number(port))) {
+    return null;
+  }
+  const runCommandImpl = options.runCommandImpl ?? runExecutable;
+  const result = runCommandImpl(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-Command",
+      `(Get-NetTCPConnection -LocalPort ${Number(port)} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1).OwningProcess`
+    ],
+    { cwd: options.cwd, env: options.env }
+  );
+  if (result.error || result.status !== 0) {
+    return null;
+  }
+  const pid = Number(String(result.stdout ?? "").trim());
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
 }
 
 export function terminateTaskWorkerProcessTree(pid, options = {}) {

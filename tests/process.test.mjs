@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { terminateProcessTree, terminateTaskWorkerProcessTree } from "../plugins/opencode/scripts/lib/process.mjs";
+import {
+  findListeningPid,
+  readProcessCommandLine,
+  runExecutable,
+  terminateProcessTree,
+  terminateTaskWorkerProcessTree
+} from "../plugins/opencode/scripts/lib/process.mjs";
 
 test("terminateProcessTree uses taskkill on Windows", () => {
   let captured = null;
@@ -107,4 +113,44 @@ test("terminateTaskWorkerProcessTree keeps process-group termination for matchin
   assert.equal(outcome.attempted, true);
   assert.equal(outcome.delivered, true);
   assert.equal(outcome.method, "process-group");
+});
+
+test("runExecutable passes arguments through intact, with no shell to reinterpret them (issue #65)", () => {
+  const tricky = `(Get-CimInstance Win32_Process -Filter 'ProcessId = 1').CommandLine "quoted"`;
+  const result = runExecutable(process.execPath, ["-e", "process.stdout.write(process.argv[1])", tricky]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, tricky);
+});
+
+test("readProcessCommandLine asks PowerShell with a single-quoted filter on Windows", () => {
+  let captured = null;
+  const commandLine = readProcessCommandLine(4321, {
+    platform: "win32",
+    runCommandImpl(command, args) {
+      captured = { command, args };
+      return { command, args, status: 0, signal: null, stdout: "opencode serve --port 4096\r\n", stderr: "", error: null };
+    }
+  });
+  assert.equal(commandLine, "opencode serve --port 4096");
+  assert.deepEqual(captured, {
+    command: "powershell.exe",
+    args: ["-NoProfile", "-Command", "(Get-CimInstance Win32_Process -Filter 'ProcessId = 4321').CommandLine"]
+  });
+});
+
+test("findListeningPid reads the port's owning process on Windows and is null elsewhere", () => {
+  const runCommandImpl = (command, args) => {
+    assert.equal(command, "powershell.exe");
+    assert.match(args[2], /Get-NetTCPConnection -LocalPort 4096 -State Listen/);
+    return { command, args, status: 0, signal: null, stdout: "6328\r\n", stderr: "", error: null };
+  };
+  assert.equal(findListeningPid(4096, { platform: "win32", runCommandImpl }), 6328);
+  assert.equal(
+    findListeningPid(4096, {
+      platform: "win32",
+      runCommandImpl: (command, args) => ({ command, args, status: 0, signal: null, stdout: "", stderr: "", error: null })
+    }),
+    null
+  );
+  assert.equal(findListeningPid(4096, { platform: "linux", runCommandImpl }), null);
 });
