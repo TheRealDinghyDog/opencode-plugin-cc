@@ -14,18 +14,15 @@ export class OpencodeHttpError extends Error {
 }
 
 // The plugin drives OpenCode's 1.x server API, and 2.x's new /api/* surface
-// through a separate client. 2.x support stays off until it is complete
-// (issue #46); OPENCODE_COMPANION_EXPERIMENTAL_V2=1 turns it on for
-// development. Every "is this major usable?" decision goes through here.
+// through a separate client (issue #46). 2.x support is experimental: it is
+// tested against a real 2.x server on macOS only. A later major stays
+// unsupported until it is checked. Every "is this major usable?" decision
+// goes through here.
 export const SUPPORTED_OPENCODE_MAJOR = 1;
-export const EXPERIMENTAL_V2_ENV = "OPENCODE_COMPANION_EXPERIMENTAL_V2";
+export const EXPERIMENTAL_OPENCODE_MAJOR = 2;
 
-export function opencodeV2Enabled(env = process.env) {
-  return env?.[EXPERIMENTAL_V2_ENV] === "1";
-}
-
-export function isSupportedOpencodeMajor(major, env = process.env) {
-  return major === SUPPORTED_OPENCODE_MAJOR || (major === 2 && opencodeV2Enabled(env));
+export function isSupportedOpencodeMajor(major) {
+  return major === SUPPORTED_OPENCODE_MAJOR || major === EXPERIMENTAL_OPENCODE_MAJOR;
 }
 
 // `opencode --version` prints "1.18.34" on 1.x and "opencode v2.0.20" on 2.x;
@@ -37,9 +34,8 @@ export function parseOpencodeVersionInfo(text) {
 
 export function unsupportedOpencodeVersionMessage(version) {
   return (
-    `OpenCode ${version} is not supported yet: this plugin uses the OpenCode 1.x server API, which OpenCode 2.x replaced. ` +
-    "Install the OpenCode 1.x line (`npm install -g opencode-ai`, or OpenCode's Homebrew tap " +
-    "`anomalyco/tap/opencode` after uninstalling the core `opencode` formula), then rerun `/opencode:setup`."
+    `OpenCode ${version} is not supported yet: this plugin supports OpenCode 1.x, and 2.x experimentally. ` +
+    "Install a supported version (`npm install -g opencode-ai` installs 1.x), then rerun `/opencode:setup`."
   );
 }
 
@@ -430,6 +426,11 @@ export class OpencodeServerClient {
     }
     const versionInfo = parseOpencodeVersionInfo(body.version);
     if (versionInfo && versionInfo.major > SUPPORTED_OPENCODE_MAJOR) {
+      // 2.x speaks the /api/* surface, which the 2.x client probes next; only
+      // a major the plugin doesn't support ends the probe here.
+      if (isSupportedOpencodeMajor(versionInfo.major)) {
+        throw new Error(`OpenCode GET /global/health reported ${versionInfo.version}, which is not a 1.x server.`);
+      }
       throw unsupportedOpencodeVersionError(versionInfo.version);
     }
     return body;

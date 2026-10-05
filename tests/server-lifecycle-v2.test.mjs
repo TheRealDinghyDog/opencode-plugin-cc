@@ -66,7 +66,6 @@ function fixtureEnv(binDir, extra = {}) {
     ...extra
   };
   delete env.OPENCODE_COMPANION_SERVER_URL;
-  delete env.OPENCODE_COMPANION_EXPERIMENTAL_V2;
   return { ...env, ...extra };
 }
 
@@ -110,7 +109,7 @@ test("ensureServer runs a plugin-owned 2.x server when 2.x is enabled, and tears
     const binDir = makeTempDir();
     installFakeOpencodeV2(binDir);
     const workspace = makeTempDir();
-    const env = fixtureEnv(binDir, { OPENCODE_COMPANION_EXPERIMENTAL_V2: "1" });
+    const env = fixtureEnv(binDir);
 
     const server = await ensureServer(workspace, { env });
     assert.equal(server.api, 2);
@@ -125,32 +124,35 @@ test("ensureServer runs a plugin-owned 2.x server when 2.x is enabled, and tears
   });
 });
 
-test("ensureServer refuses a 2.x server while 2.x is disabled and leaves nothing running", { skip: LOCAL_LISTEN_SKIP }, async () => {
+test("ensureServer refuses a server of an unsupported major and leaves nothing running", { skip: LOCAL_LISTEN_SKIP }, async () => {
   await withPluginData(async () => {
     const binDir = makeTempDir();
     installFakeOpencodeV2(binDir);
     const workspace = makeTempDir();
 
-    await assert.rejects(ensureServer(workspace, { env: fixtureEnv(binDir) }), /OpenCode 2\.x is not supported yet/);
+    await assert.rejects(
+      ensureServer(workspace, { env: fixtureEnv(binDir, { FAKE_OPENCODE_V2_VERSION: "3.0.0" }) }),
+      /OpenCode 3\.x is not supported yet/
+    );
     assert.equal(loadServerSession(workspace), null);
   });
 });
 
-test("an external 2.x server is used only when 2.x is enabled", { skip: LOCAL_LISTEN_SKIP }, async () => {
+test("an external 2.x server is used, and one of an unsupported major is refused", { skip: LOCAL_LISTEN_SKIP }, async () => {
   const external = await startExternal(installFakeOpencodeV2);
+  const future = await startExternal(installFakeOpencodeV2, { FAKE_OPENCODE_V2_VERSION: "3.0.0" });
   const workspace = makeTempDir();
   try {
-    await assert.rejects(
-      ensureServer(workspace, { env: { OPENCODE_COMPANION_SERVER_URL: external.url } }),
-      /Configured OpenCode server is not healthy: .*OpenCode 2\.x is not supported yet/
-    );
-    const server = await ensureServer(workspace, {
-      env: { OPENCODE_COMPANION_SERVER_URL: external.url, OPENCODE_COMPANION_EXPERIMENTAL_V2: "1" }
-    });
+    const server = await ensureServer(workspace, { env: { OPENCODE_COMPANION_SERVER_URL: external.url } });
     assert.equal(server.api, 2);
     assert.equal(server.external, true);
+    await assert.rejects(
+      ensureServer(makeTempDir(), { env: { OPENCODE_COMPANION_SERVER_URL: future.url } }),
+      /OpenCode 3\.x is not supported yet/
+    );
   } finally {
     external.child.kill();
+    future.child.kill();
   }
 });
 
@@ -174,7 +176,7 @@ test("a server record from before 2.x support is reused and stamped as 1.x", { s
 test("an external 2.x server with a missing or wrong password gets the credentials message", { skip: LOCAL_LISTEN_SKIP }, async () => {
   const external = await startExternal(installFakeOpencodeV2, { OPENCODE_SERVER_PASSWORD: "right" });
   const workspace = makeTempDir();
-  const base = { OPENCODE_COMPANION_SERVER_URL: external.url, OPENCODE_COMPANION_EXPERIMENTAL_V2: "1" };
+  const base = { OPENCODE_COMPANION_SERVER_URL: external.url };
   try {
     await assert.rejects(ensureServer(workspace, { env: base }), /requires authentication/);
     await assert.rejects(

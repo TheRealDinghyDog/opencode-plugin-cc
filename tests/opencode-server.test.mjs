@@ -258,9 +258,17 @@ test("health rejects the HTML an OpenCode 2.x server serves on the retired route
 
 test("health rejects a server that reports an unsupported major version", async () => {
   await assert.rejects(
-    healthClient('{"healthy":true,"version":"2.0.20"}').health(),
-    /OpenCode 2\.0\.20 is not supported yet/
+    healthClient('{"healthy":true,"version":"3.0.0"}').health(),
+    /OpenCode 3\.0\.0 is not supported yet/
   );
+});
+
+test("a 2.x version on the 1.x health route is not a 1.x server, so the 2.x probe gets its turn", async () => {
+  await assert.rejects(healthClient('{"healthy":true,"version":"2.0.20"}').health(), (error) => {
+    assert.match(error.message, /reported 2\.0\.20, which is not a 1\.x server/);
+    assert.notEqual(error.code, "OPENCODE_UNSUPPORTED_VERSION");
+    return true;
+  });
 });
 
 test("parseOpencodeVersionInfo reads both 1.x and 2.x --version output", () => {

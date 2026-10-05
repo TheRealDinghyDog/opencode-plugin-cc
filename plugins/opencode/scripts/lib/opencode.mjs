@@ -9,6 +9,7 @@ import { createTempDir, readJsonFile, writeJsonFile } from "./fs.mjs";
 import {
   OpencodeHttpError,
   OpencodeServerClient,
+  EXPERIMENTAL_OPENCODE_MAJOR,
   isSupportedOpencodeMajor,
   parseOpencodeVersionInfo,
   unsupportedOpencodeVersionMessage
@@ -1276,7 +1277,7 @@ export function getAvailability(cwd, env = process.env) {
   // user-managed external server is checked by its own health response
   // instead, since turns never touch the local binary's server API.
   const versionInfo = parseOpencodeVersionInfo(versionStatus.detail);
-  if (versionInfo && !isSupportedOpencodeMajor(versionInfo.major, env) && !env?.[SERVER_URL_ENV]) {
+  if (versionInfo && !isSupportedOpencodeMajor(versionInfo.major) && !env?.[SERVER_URL_ENV]) {
     return {
       available: false,
       unsupported: true,
@@ -1293,9 +1294,13 @@ export function getAvailability(cwd, env = process.env) {
     };
   }
 
+  // 2.x support is experimental (issue #56); say so wherever the version shows.
+  const experimental = versionInfo?.major === EXPERIMENTAL_OPENCODE_MAJOR;
   return {
     available: true,
-    detail: `${versionStatus.detail}; headless server available`
+    major: versionInfo?.major ?? null,
+    experimental,
+    detail: `${versionStatus.detail}; headless server available${experimental ? "; OpenCode 2.x support is experimental" : ""}`
   };
 }
 
@@ -1888,7 +1893,7 @@ export async function importExternalAgentSession(cwd, options = {}) {
   const versionOutput = versionResult.stdout || versionResult.stderr;
   // OpenCode 2.x moved `opencode import` and changed the session format.
   const versionInfo = parseOpencodeVersionInfo(versionOutput);
-  if (versionInfo && !isSupportedOpencodeMajor(versionInfo.major, options.env ?? process.env)) {
+  if (versionInfo && !isSupportedOpencodeMajor(versionInfo.major)) {
     throw new Error(unsupportedOpencodeVersionMessage(versionInfo.version));
   }
   const version = parseOpenCodeVersion(versionOutput);

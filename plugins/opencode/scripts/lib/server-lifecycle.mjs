@@ -10,6 +10,7 @@ import { lockIsStale, readLockOwner, releaseLock, stealStaleLock, tryCreateLock 
 import {
   OpencodeServerClient,
   isSupportedOpencodeMajor,
+  parseOpencodeVersionInfo,
   unsupportedOpencodeVersionError
 } from "./opencode-server.mjs";
 import { OpencodeV2Client } from "./opencode-server-v2.mjs";
@@ -128,8 +129,14 @@ async function probeServerApi(url, credentials, signal) {
     v1Error = error;
   }
   try {
-    await new OpencodeV2Client(url, credentials).health({ signal, closeConnection: true });
-    return 2;
+    // Report the major the /api/* server claims, so the callers' gate refuses
+    // one the plugin doesn't support (a later 3.x) at once and by name.
+    const info = await new OpencodeV2Client(url, credentials).info({ signal, closeConnection: true });
+    const versionInfo = parseOpencodeVersionInfo(info?.version);
+    if (!versionInfo || versionInfo.major < 2) {
+      throw new Error("OpenCode GET /api/info did not report a 2.x or later version.");
+    }
+    return versionInfo.major;
   } catch (error) {
     // 2.x serves its retired 1.x routes without auth, so a missing or wrong
     // password only shows up here.
@@ -165,8 +172,8 @@ async function waitForServerHealth(url, timeoutMs = 10000, credentials = {}) {
   return null;
 }
 
-function assertSupportedServerApi(api, env) {
-  if (!isSupportedOpencodeMajor(api, env)) {
+function assertSupportedServerApi(api) {
+  if (!isSupportedOpencodeMajor(api)) {
     throw unsupportedOpencodeVersionError(`${api}.x`);
   }
 }
@@ -370,7 +377,7 @@ export async function ensureServer(cwd, options = {}) {
         (signal) => probeServerApi(overrideUrl, credentials, signal),
         options.healthTimeoutMs ?? 1000
       );
-      assertSupportedServerApi(api, envSource);
+      assertSupportedServerApi(api);
     } catch (error) {
       if (error?.status === 401) {
         throw new Error(
@@ -399,7 +406,7 @@ export async function ensureServer(cwd, options = {}) {
 
   try {
     const lockedExisting = await loadHealthyServerSession(cwd, options.healthTimeoutMs ?? 500);
-    if (lockedExisting && isSupportedOpencodeMajor(lockedExisting.api, options.env ?? process.env)) {
+    if (lockedExisting && isSupportedOpencodeMajor(lockedExisting.api)) {
       const leasedExisting = addServerLease(lockedExisting, options);
       saveServerSession(cwd, leasedExisting);
       return leasedExisting;
@@ -462,7 +469,7 @@ export async function ensureServer(cwd, options = {}) {
     // matches the LIVE command line against `opencode serve --port <port>`.
     const pidCommandLine = readProcessCommandLine(serverPid, options);
     // A server the plugin cannot drive is torn down like one that never came up.
-    const ready = api !== null && isSupportedOpencodeMajor(api, options.env ?? process.env);
+    const ready = api !== null && isSupportedOpencodeMajor(api);
     if (!ready) {
       await teardownServerSession({
         url,

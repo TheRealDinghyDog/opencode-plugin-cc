@@ -46,7 +46,6 @@ function setup(scenario = "success", extra = {}) {
     FAKE_OPENCODE_V2_SCENARIO: scenario,
     CLAUDE_PLUGIN_DATA: makeTempDir("opencode-plugin-data-"),
     OPENCODE_COMPANION_SESSION_ID: "sess-v2",
-    OPENCODE_COMPANION_EXPERIMENTAL_V2: "1",
     ...extra
   };
   delete env.OPENCODE_COMPANION_SERVER_URL;
@@ -267,12 +266,12 @@ test("cancelling one background job leaves the server another job uses", { skip:
   }
 });
 
-test("without the switch, a 2.x CLI is still reported unsupported", { skip: LOCAL_LISTEN_SKIP }, () => {
-  const ctx = setup("success", { OPENCODE_COMPANION_EXPERIMENTAL_V2: "" });
+test("a 3.x CLI is reported unsupported and starts no server", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0" });
   try {
     const result = companion(ctx, ["task", "check"]);
     assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}${result.stderr}`, /OpenCode 2\.0\.20 is not supported yet/);
+    assert.match(`${result.stdout}${result.stderr}`, /OpenCode 3\.0\.0 is not supported yet/);
     assert.equal(readFakeState(ctx.binDir)?.serverStarts ?? 0, 0);
   } finally {
     cleanup(ctx);

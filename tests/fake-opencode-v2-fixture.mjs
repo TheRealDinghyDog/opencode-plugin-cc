@@ -514,7 +514,12 @@ function startServer(args) {
   }
 
   const routes = [
-    ["GET", /^\/api\/info$/, (req, res) => sendJson(res, { version: "2.0.20", pid: process.pid, urls: [], paths: {} })],
+    [
+      "GET",
+      /^\/api\/info$/,
+      (req, res) =>
+        sendJson(res, { version: process.env.FAKE_OPENCODE_V2_VERSION || "2.0.20", pid: process.pid, urls: [], paths: {} })
+    ],
     [
       "GET",
       /^\/api\/event$/,
