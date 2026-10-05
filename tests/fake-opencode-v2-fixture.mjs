@@ -96,12 +96,88 @@ export function runFakeOpencodeV2(args) {
     console.log(`${MODEL.providerID}/${MODEL.id}`);
     return;
   }
+  if (args[0] === "session" && args[1] === "import") {
+    importSession(args.slice(2));
+    return;
+  }
   if (args[0] !== "serve") {
     console.error(`fake opencode v2: unsupported command ${args.join(" ")}`);
     process.exitCode = 1;
     return;
   }
   startServer(args);
+}
+
+// Required and allowed keys of the import document's schemas, from the real
+// 2.0.20 /openapi.json. Every one of them sets additionalProperties: false.
+const IMPORT_SCHEMAS = {
+  info: {
+    required: ["id", "projectID", "cost", "tokens", "time", "location"],
+    allowed: ["parentID", "fork", "agent", "model", "outcome", "title", "subpath", "metadata", "permissions", "revert"]
+  },
+  user: { required: ["id", "time", "text", "type"], allowed: ["metadata", "files", "agents", "skills"] },
+  assistant: {
+    required: ["id", "time", "type", "agent", "model", "content"],
+    allowed: ["metadata", "snapshot", "finish", "rawFinish", "providerState", "cost", "tokens", "error", "retry"]
+  },
+  model: { required: ["id", "providerID"], allowed: ["variant"] },
+  tokens: { required: ["input", "output", "reasoning", "cache"], allowed: [] },
+  location: { required: ["directory"], allowed: [] },
+  text: { required: ["type", "text"], allowed: ["state"] }
+};
+
+function checkKeys(value, schema, where) {
+  const keys = Object.keys(value ?? {});
+  const missing = IMPORT_SCHEMAS[schema].required.filter((key) => !keys.includes(key));
+  if (missing.length > 0) {
+    // The real CLI names no key: "SchemaError: Missing key".
+    throw new Error(`SchemaError: Missing key (${where}.${missing[0]})`);
+  }
+  const known = [...IMPORT_SCHEMAS[schema].required, ...IMPORT_SCHEMAS[schema].allowed];
+  const unknown = keys.find((key) => !known.includes(key));
+  if (unknown) {
+    throw new Error(`SchemaError: Unexpected key (${where}.${unknown})`);
+  }
+}
+
+// `opencode session import [--standalone] [--directory <dir>] <file>`. Like
+// the real 2.x CLI it keeps the document's session id. Without --standalone
+// the real CLI goes through OpenCode's background service, which the plugin
+// must never start, so the fake refuses.
+function importSession(args) {
+  const file = args.filter((arg) => !arg.startsWith("--")).pop();
+  try {
+    if (!args.includes("--standalone")) {
+      throw new Error("fake opencode v2: session import without --standalone would start the background service");
+    }
+    const document = JSON.parse(fs.readFileSync(file, "utf8"));
+    checkKeys(document.info, "info", "info");
+    checkKeys(document.info.model ?? { id: "", providerID: "" }, "model", "info.model");
+    checkKeys(document.info.tokens, "tokens", "info.tokens");
+    checkKeys(document.info.location, "location", "info.location");
+    for (const [index, message] of (document.messages ?? []).entries()) {
+      if (message.type !== "user" && message.type !== "assistant") {
+        throw new Error(`fake opencode v2: unexpected message type ${message.type}`);
+      }
+      checkKeys(message, message.type, `messages[${index}]`);
+      if (message.type === "assistant") {
+        checkKeys(message.model, "model", `messages[${index}].model`);
+        message.content.forEach((part, partIndex) => checkKeys(part, "text", `messages[${index}].content[${partIndex}]`));
+      }
+    }
+    const sessionID = document.info.id;
+    updateState((state) => {
+      state.imports = state.imports ?? [];
+      if (state.imports.some((entry) => entry.sessionID === sessionID)) {
+        throw new Error("Session already exists");
+      }
+      state.imports.push({ args, cwd: process.cwd(), sessionID, document });
+    });
+    console.log(`Imported session: ${sessionID}`);
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
 }
 
 function startServer(args) {
