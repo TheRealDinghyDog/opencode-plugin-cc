@@ -552,6 +552,101 @@ function checkTurn(workspace, env, record) {
   }
 }
 
+function findServerRecords(dir) {
+  const records = [];
+  const walk = (current) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.name === "server.json") {
+        try {
+          records.push(JSON.parse(fs.readFileSync(full, "utf8")));
+        } catch {
+          // A half-written record has nothing to probe.
+        }
+      }
+    }
+  };
+  try {
+    walk(dir);
+  } catch {
+    // No state written yet.
+  }
+  return records;
+}
+
+async function respondsAt(url) {
+  try {
+    await fetch(`${url}/`, { signal: AbortSignal.timeout(1500) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function killTree(pid) {
+  if (!Number.isFinite(pid)) {
+    return;
+  }
+  if (ON_WINDOWS) {
+    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true });
+  } else {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
+// Ends the run the way a Claude session ends, and checks that it really did:
+// any OpenCode server still answering afterwards is a failure (on Windows
+// the plugin's teardown has to find the server behind its spawn shell).
+async function cleanUp({ server, workspace, pluginData, env, sessionId, record }) {
+  const pluginServers = findServerRecords(pluginData);
+  stopServer(server);
+  const hook = spawnSync(process.execPath, [SESSION_HOOK, "SessionEnd"], {
+    cwd: workspace,
+    env,
+    input: JSON.stringify({ cwd: workspace, session_id: sessionId }),
+    encoding: "utf8",
+    timeout: 30 * 1000
+  });
+  const hookOutput = `${hook.stdout ?? ""}${hook.stderr ?? ""}`.trim();
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+
+  const survivors = [];
+  if (server && (await respondsAt(server.url))) {
+    survivors.push(`the canary's own server ${server.url}`);
+    killTree(server.child.pid);
+  }
+  for (const entry of pluginServers) {
+    if (entry?.url && (await respondsAt(entry.url))) {
+      survivors.push(`the plugin's server ${entry.url} (pid ${entry.pid})`);
+      killTree(entry.pid);
+    }
+  }
+  if (survivors.length > 0) {
+    record(
+      "teardown",
+      "fail",
+      `still running after session end: ${survivors.join("; ")}${hookOutput ? `\nSessionEnd hook: ${hookOutput}` : ""}`
+    );
+  } else if (pluginServers.length > 0) {
+    record("teardown", "pass", "the plugin's server stopped at session end");
+  }
+
+  for (const dir of [workspace, pluginData]) {
+    try {
+      // Windows can hold files for a moment after a process exits.
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    } catch (error) {
+      record("cleanup", "notice", `could not remove ${dir}: ${error.code ?? error.message}`);
+    }
+  }
+}
+
 export async function runCanary(options = {}) {
   const channel = options.channel ?? "local";
   const checks = [];
@@ -581,52 +676,42 @@ export async function runCanary(options = {}) {
     versionInfo = parseOpencodeVersionInfo(`${version.stdout ?? ""}${version.stderr ?? ""}`);
     if (!versionInfo) {
       record("opencode --version", "fail", version.error?.message ?? (`${version.stdout}${version.stderr}`.trim() || `exit ${version.status}`));
-      return finishReport({ channel, checks, versionInfo, contract });
-    }
-    record("opencode --version", "pass", versionInfo.version);
-    checkChannelFreshness(channel, versionInfo.version, record);
-    const contractFile = CONTRACT_FILES[versionInfo.major];
-    contract = contractFile ? JSON.parse(fs.readFileSync(contractFile, "utf8")) : null;
+    } else {
+      record("opencode --version", "pass", versionInfo.version);
+      checkChannelFreshness(channel, versionInfo.version, record);
+      const contractFile = CONTRACT_FILES[versionInfo.major];
+      contract = contractFile ? JSON.parse(fs.readFileSync(contractFile, "utf8")) : null;
 
-    const setupRun = runCompanion(["setup", "--json"], workspace, env, 2 * 60 * 1000);
-    let setup = null;
-    try {
-      setup = JSON.parse(setupRun.stdout);
-    } catch {
-      // Recorded as a failure below.
-    }
-    const pluginReady = checkSetup(setup, versionInfo, contract, record);
-
-    if (contract) {
+      const setupRun = runCompanion(["setup", "--json"], workspace, env, 2 * 60 * 1000);
+      let setup = null;
       try {
-        server = await startServer(workspace);
-        if (versionInfo.major === 1) {
-          await checkV1Server(server, contract, workspace, record);
-        } else {
-          await checkV2Server(server, contract, workspace, record);
+        setup = JSON.parse(setupRun.stdout);
+      } catch {
+        // Recorded as a failure below.
+      }
+      const pluginReady = checkSetup(setup, versionInfo, contract, record);
+
+      if (contract) {
+        try {
+          server = await startServer(workspace);
+          if (versionInfo.major === 1) {
+            await checkV1Server(server, contract, workspace, record);
+          } else {
+            await checkV2Server(server, contract, workspace, record);
+          }
+        } catch (error) {
+          record("opencode serve", "fail", error instanceof Error ? error.message : String(error));
         }
-      } catch (error) {
-        record("opencode serve", "fail", error instanceof Error ? error.message : String(error));
+      }
+
+      if (options.turn && pluginReady) {
+        checkTurn(workspace, env, record);
       }
     }
-
-    if (options.turn && pluginReady) {
-      checkTurn(workspace, env, record);
-    }
-  } finally {
-    stopServer(server);
-    spawnSync(process.execPath, [SESSION_HOOK, "SessionEnd"], {
-      cwd: workspace,
-      env,
-      input: JSON.stringify({ cwd: workspace, session_id: sessionId }),
-      encoding: "utf8",
-      timeout: 30 * 1000
-    });
-    for (const dir of [workspace, pluginData]) {
-      // Windows can hold files for a moment after the server exits.
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
-    }
+  } catch (error) {
+    record("canary run", "fail", error instanceof Error ? error.stack ?? error.message : String(error));
   }
+  await cleanUp({ server, workspace, pluginData, env, sessionId, record });
   return finishReport({ channel, checks, versionInfo, contract });
 }
 
