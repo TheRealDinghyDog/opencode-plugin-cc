@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import {
   diffRoutes,
   diffV1Contract,
+  diffV2Requests,
   extractV1Contract,
   failingIssueTitle,
   newMajorIssueTitle,
@@ -171,4 +172,25 @@ test("each OS running a channel gets its own label and issue", () => {
     planIssueActions(failing, open).map(({ action, title }) => ({ action, title })),
     [{ action: "create", title: "OpenCode canary failing: npm-latest on Windows" }]
   );
+});
+
+test("diffV2Requests catches dropped fields and newly required ones", () => {
+  const doc = {
+    paths: {
+      "/api/session/{id}/prompt": {
+        post: { requestBody: { content: { "application/json": { schema: { $ref: "#/components/schemas/Prompt" } } } } }
+      }
+    },
+    components: {
+      schemas: { Prompt: { type: "object", required: ["parts"], properties: { parts: {}, metadata: {} } } }
+    }
+  };
+  const findings = diffV2Requests({ "POST /api/session/{sessionID}/prompt": { sends: ["text"] } }, doc);
+  assert.deepEqual(findings.breaking, [
+    'POST /api/session/{sessionID}/prompt: "text" is no longer accepted',
+    'POST /api/session/{sessionID}/prompt: "parts" is now required'
+  ]);
+  assert.deepEqual(diffV2Requests({ "POST /api/missing": { sends: [] } }, doc).breaking, [
+    "POST /api/missing: no JSON request body"
+  ]);
 });

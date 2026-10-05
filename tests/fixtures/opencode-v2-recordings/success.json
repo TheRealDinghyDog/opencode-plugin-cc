@@ -1,0 +1,507 @@
+{
+ "name": "success",
+ "sid": "ses_ef65ad614ffei47dq2oSf3PTU3",
+ "outcome": "session.execution.succeeded",
+ "promptStatus": 200,
+ "events": [
+  {
+   "id": "evt_109a529e8001lLwlunaTPb1lBe",
+   "type": "server.connected",
+   "data": {}
+  },
+  {
+   "id": "evt_109a52a20001u4fq5ak21IfILx",
+   "created": 1791163181600,
+   "type": "worktree.resolved",
+   "data": {
+    "projectID": "1ada4a79449f4696c69aac673f4b2b0da6cc784b",
+    "directory": "/tmp/workspace",
+    "previous": "global"
+   },
+   "durable": {
+    "aggregateID": "1ada4a79449f4696c69aac673f4b2b0da6cc784b",
+    "seq": 0,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a52a26001PuYKBrxJtNqXB0",
+   "created": 1791163181606,
+   "type": "session.created",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "slug": "nimble-forest",
+    "version": "2.0.20",
+    "projectID": "1ada4a79449f4696c69aac673f4b2b0da6cc784b",
+    "location": {
+     "directory": "/tmp/workspace"
+    },
+    "subpath": "",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 0,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a52a54001nUUqNWK1n1pTqr",
+   "created": 1791163181652,
+   "type": "project.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "id": "1ada4a79449f4696c69aac673f4b2b0da6cc784b",
+    "canonical": "/tmp/workspace",
+    "vcs": "git",
+    "time": {
+     "created": 1791163181593,
+     "updated": 1791163181593,
+     "active": 1791163181652
+    },
+    "sandboxes": []
+   }
+  },
+  {
+   "id": "evt_109a52c94001lMqMvVPZt9R146",
+   "created": 1791163182228,
+   "type": "integration.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a52c97001cYV0OuFiBm8pr8",
+   "created": 1791163182231,
+   "type": "provider.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a52ca0001579l0sEqlx4SMS",
+   "created": 1791163182240,
+   "type": "model.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a52cc4001ox0C5zi8xyUurQ",
+   "created": 1791163182276,
+   "type": "vcs.branch.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "branch": "main"
+   }
+  },
+  {
+   "id": "evt_109a52cc5001d7X0u8ZUqQo9Jf",
+   "created": 1791163182277,
+   "type": "agent.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a52cc5002opvl6Mx6L3iQ56",
+   "created": 1791163182277,
+   "type": "command.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a52cc50031umFKiGu3raRZE",
+   "created": 1791163182277,
+   "type": "skill.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a52cc8001vAo39AdnOs8CwB",
+   "created": 1791163182280,
+   "type": "websearch.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a52cc8003qvYF9ntrwYDTLU",
+   "created": 1791163182280,
+   "type": "reference.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a52cd5001u0bRDt15pK0y5z",
+   "created": 1791163182293,
+   "type": "plugin.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a52cd6001qhZVwODFTXFefe",
+   "created": 1791163182294,
+   "type": "session.inbox.enqueued",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "inboxID": "msg_109a52ac9001mnfx5thPzCDea0",
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "item": {
+     "type": "user",
+     "payload": {
+      "text": "Reply with exactly the word PONG and nothing else. Do not use any tools."
+     },
+     "delivery": "steer"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 1,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a52cd8001z5F5DmKulDHL0H",
+   "created": 1791163182296,
+   "type": "session.execution.started",
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 2,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a52ce60017RQIheyOQ7aQ0Z",
+   "created": 1791163182310,
+   "metadata": {
+    "instructions": {
+     "initial": true
+    }
+   },
+   "type": "session.instructions.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "delta": {
+     "core/codemode": "616a7ad8b8e40e8a71eab238dfbbe9eaf0f4a9e6fdad853226d075bfe602e1e6",
+     "core/skill-guidance": "59bf307ea999cd149e77936c3e695752fa23949e3a3c63c50515568bb71b0c99",
+     "core/date": "5c3ade85f6455ad46661f59c7b66a8fa997d86a35616f652f28ff2e8c891b5aa",
+     "core/environment": "1744650d2d35afdce858e8a685c7cce043d6e26f4cc518f00d15c2b356888107"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 3,
+    "version": 2
+   }
+  },
+  {
+   "id": "evt_109a52ce70013S8dsGe9RKSWR1",
+   "created": 1791163182311,
+   "type": "session.inbox.delivered",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "inboxID": "msg_109a52ac9001mnfx5thPzCDea0"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 4,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a531f3001wYEn0VHQ17V9TD",
+   "created": 1791163183603,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "cost": 3.0404e-05,
+    "tokens": {
+     "input": 23,
+     "output": 2,
+     "reasoning": 0,
+     "cache": {
+      "read": 512,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a531f3002Sv5hs1K5A9rUrw",
+   "created": 1791163183603,
+   "type": "session.renamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "title": "PONG"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 6,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a535300012Oap23IvRnNDo9",
+   "created": 1791163184432,
+   "type": "session.step.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "assistantMessageID": "msg_109a52cf4001oOphKqqJWjCn9b",
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "started": 1791163182428
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 7,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a53533001QcKDQIOEFn46gU",
+   "created": 1791163184435,
+   "type": "session.text.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "assistantMessageID": "msg_109a52cf4001oOphKqqJWjCn9b",
+    "ordinal": 0
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 8,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5359b001V4sp4uj4gj35qA",
+   "created": 1791163184539,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "assistantMessageID": "msg_109a52cf4001oOphKqqJWjCn9b",
+    "ordinal": 0,
+    "delta": "PONG"
+   }
+  },
+  {
+   "id": "evt_109a53616001XbiNku8vKeQ81G",
+   "created": 1791163184662,
+   "type": "session.text.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "assistantMessageID": "msg_109a52cf4001oOphKqqJWjCn9b",
+    "ordinal": 0,
+    "text": "PONG"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 9,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a53618001Yu1Zo23cYWo5i7",
+   "created": 1791163184664,
+   "type": "session.step.streamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "assistantMessageID": "msg_109a52cf4001oOphKqqJWjCn9b"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 10,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5363f0013c2gaX7mEClDxM",
+   "created": 1791163184703,
+   "type": "session.step.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "assistantMessageID": "msg_109a52cf4001oOphKqqJWjCn9b",
+    "finish": "stop",
+    "rawFinish": "stop",
+    "cost": 0.006336660000000001,
+    "tokens": {
+     "input": 9595,
+     "output": 2,
+     "reasoning": 0,
+     "cache": {
+      "read": 0,
+      "write": 0
+     }
+    },
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "files": []
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 11,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a53641001nn3RH3VsxB5qpn",
+   "created": 1791163184705,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "cost": 0.006367064000000001,
+    "tokens": {
+     "input": 9618,
+     "output": 4,
+     "reasoning": 0,
+     "cache": {
+      "read": 512,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a53642001jQ6g5FwQJ7YaPL",
+   "created": 1791163184706,
+   "type": "session.execution.succeeded",
+   "data": {
+    "sessionID": "ses_ef65ad614ffei47dq2oSf3PTU3"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ad614ffei47dq2oSf3PTU3",
+    "seq": 12,
+    "version": 1
+   }
+  }
+ ],
+ "messages": {
+  "data": [
+   {
+    "id": "msg_109a53642001jQ6g5FwQJ7YaPL",
+    "time": {
+     "created": 1791163184706
+    },
+    "type": "idle",
+    "outcome": "succeeded"
+   },
+   {
+    "id": "msg_109a52cf4001oOphKqqJWjCn9b",
+    "time": {
+     "created": 1791163182428,
+     "streamed": 1791163184664,
+     "completed": 1791163184703
+    },
+    "type": "assistant",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "content": [
+     {
+      "type": "text",
+      "text": "PONG"
+     }
+    ],
+    "snapshot": {
+     "start": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "end": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "files": []
+    },
+    "finish": "stop",
+    "rawFinish": "stop",
+    "cost": 0.006336660000000001,
+    "tokens": {
+     "input": 9595,
+     "output": 2,
+     "reasoning": 0,
+     "cache": {
+      "read": 0,
+      "write": 0
+     }
+    }
+   },
+   {
+    "id": "msg_109a52ac9001mnfx5thPzCDea0",
+    "time": {
+     "created": 1791163182311
+    },
+    "text": "Reply with exactly the word PONG and nothing else. Do not use any tools.",
+    "type": "user"
+   }
+  ],
+  "cursor": {
+   "previous": "eyJpZCI6Im1zZ18xMDlhNTM2NDIwMDFqUTZnNUZ3UUo3WWFQTCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+   "next": "eyJpZCI6Im1zZ18xMDlhNTJhYzkwMDFtbmZ4NXRoUHpDRGVhMCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+  }
+ },
+ "permissions": {
+  "data": []
+ },
+ "forms": {
+  "data": []
+ }
+}

@@ -422,7 +422,10 @@ test("stop review gate tears down a server left by a failed stop review task", {
     });
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).decision, "block");
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, "block");
+    // When the review task never reached OpenCode, say why (the gate's reason).
+    assert.ok(readFakeState(binDir)?.lastMessage, `the stop review never reached OpenCode: ${decision.reason}`);
     assert.match(readFakeState(binDir).lastMessage.prompt, /Run a stop-gate review of the previous Claude turn/);
     assert.equal(loadServerSession(workspace), null);
   });

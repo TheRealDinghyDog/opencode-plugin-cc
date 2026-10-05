@@ -159,6 +159,42 @@ export function diffRoutes(pinnedRoutes, doc) {
   return { breaking, additive: [] };
 }
 
+// Request bodies flow the other way: the plugin breaks when a field it sends
+// disappears or when the server starts requiring one it does not send.
+export function diffV2Requests(pinnedRequests, doc) {
+  const schemas = doc?.components?.schemas ?? {};
+  const operations = new Map();
+  for (const [routePath, ops] of Object.entries(doc?.paths ?? {})) {
+    for (const [method, operation] of Object.entries(ops ?? {})) {
+      operations.set(routeKey(method, routePath), operation);
+    }
+  }
+  const findings = { breaking: [], additive: [] };
+  for (const [route, spec] of Object.entries(pinnedRequests ?? {})) {
+    const [method, routePath] = route.split(" ");
+    let schema = operations.get(routeKey(method, routePath))?.requestBody?.content?.["application/json"]?.schema;
+    if (schema?.$ref) {
+      schema = schemas[schema.$ref.split("/").pop()];
+    }
+    if (!schema) {
+      findings.breaking.push(`${route}: no JSON request body`);
+      continue;
+    }
+    const keys = new Set(Object.keys(schema.properties ?? {}));
+    for (const key of spec.sends ?? []) {
+      if (!keys.has(key)) {
+        findings.breaking.push(`${route}: "${key}" is no longer accepted`);
+      }
+    }
+    for (const key of schema.required ?? []) {
+      if (!(spec.sends ?? []).includes(key)) {
+        findings.breaking.push(`${route}: "${key}" is now required`);
+      }
+    }
+  }
+  return findings;
+}
+
 export function rollupStatus(checks) {
   if (checks.some((check) => check.status === "fail")) {
     return "fail";
@@ -422,6 +458,7 @@ async function checkV2Server(server, contract, workspace, record) {
     record("2.x routes", "fail", `/openapi.json is not an OpenAPI document (HTTP ${openapi.status})`);
   } else {
     contractCheck(record, "2.x routes", diffRoutes(contract.routes, openapi.json));
+    contractCheck(record, "2.x request bodies", diffV2Requests(contract.requests, openapi.json));
   }
 
   const created = await request(server, "POST", "/api/session", {

@@ -1,0 +1,783 @@
+{
+ "name": "external-write",
+ "sid": "ses_ef65ab078ffepZrl8jHMp43D8s",
+ "outcome": "session.execution.succeeded",
+ "promptStatus": 200,
+ "events": [
+  {
+   "id": "evt_109a54fb5001OMsj5UwI1RW6jl",
+   "created": 1791163191221,
+   "type": "session.created",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "slug": "misty-lagoon",
+    "version": "2.0.20",
+    "projectID": "1ada4a79449f4696c69aac673f4b2b0da6cc784b",
+    "location": {
+     "directory": "/tmp/workspace"
+    },
+    "subpath": "",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 0,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a54fb8001qXplbeSl68Z5c6",
+   "created": 1791163191224,
+   "type": "session.inbox.enqueued",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "inboxID": "msg_109a54fb7001wkhhrYCtQiYaX9",
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "item": {
+     "type": "user",
+     "payload": {
+      "text": "Use the write tool to create the file /tmp/workspace.txt containing the word hi. Do not use bash."
+     },
+     "delivery": "steer"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 1,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a54fb9001Bd1Q2VzJwrKMk2",
+   "created": 1791163191225,
+   "type": "session.execution.started",
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 2,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a54fbc0012Nro0AESu2FOB1",
+   "created": 1791163191228,
+   "metadata": {
+    "instructions": {
+     "initial": true
+    }
+   },
+   "type": "session.instructions.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "delta": {
+     "core/codemode": "616a7ad8b8e40e8a71eab238dfbbe9eaf0f4a9e6fdad853226d075bfe602e1e6",
+     "core/skill-guidance": "59bf307ea999cd149e77936c3e695752fa23949e3a3c63c50515568bb71b0c99",
+     "core/date": "5c3ade85f6455ad46661f59c7b66a8fa997d86a35616f652f28ff2e8c891b5aa",
+     "core/environment": "1744650d2d35afdce858e8a685c7cce043d6e26f4cc518f00d15c2b356888107"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 3,
+    "version": 2
+   }
+  },
+  {
+   "id": "evt_109a54fbd00113OXF6YUmKeD0u",
+   "created": 1791163191229,
+   "type": "session.inbox.delivered",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "inboxID": "msg_109a54fb7001wkhhrYCtQiYaX9"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 4,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a552150014A3zviLkfpGWZZ",
+   "created": 1791163191829,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "cost": 6.0104e-05,
+    "tokens": {
+     "input": 59,
+     "output": 5,
+     "reasoning": 0,
+     "cache": {
+      "read": 512,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a55216001zLIE4eI7GrO2VS",
+   "created": 1791163191830,
+   "type": "session.renamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "title": "Create file with write tool"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 6,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5534f001HOvQMTrkej1DKB",
+   "created": 1791163192143,
+   "type": "session.step.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "started": 1791163191267
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 7,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a55353001rUhCafpmB1vWY3",
+   "created": 1791163192147,
+   "type": "session.text.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "ordinal": 0
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 8,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a553ba001Z47I3I0qXWFKsz",
+   "created": 1791163192250,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "ordinal": 0,
+    "delta": "I"
+   }
+  },
+  {
+   "id": "evt_109a5542e001pa8DfdMiLPwAP4",
+   "created": 1791163192367,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "ordinal": 0,
+    "delta": "'ll create that file using the write tool."
+   }
+  },
+  {
+   "id": "evt_109a55436001tN6DhXNx3GjRbp",
+   "created": 1791163192374,
+   "type": "session.tool.input.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "id": "call_00_PwrjLasBlFW9FnuDAdVQ6220",
+    "name": "write"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 9,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a555bc00173qB8JkmwvcXqF",
+   "created": 1791163192764,
+   "type": "session.tool.input.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "id": "call_00_PwrjLasBlFW9FnuDAdVQ6220",
+    "text": "{\"path\": \"/tmp/workspace.txt\", \"content\": \"hi\"}"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 10,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a555bf001kYs8fQ7R3ggPoo",
+   "created": 1791163192768,
+   "type": "session.tool.called",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "id": "call_00_PwrjLasBlFW9FnuDAdVQ6220",
+    "input": {
+     "path": "/tmp/workspace.txt",
+     "content": "hi"
+    },
+    "executed": false
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 11,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a555c00011tDHlA2vjwqZSc",
+   "created": 1791163192768,
+   "type": "session.text.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "ordinal": 0,
+    "text": "I'll create that file using the write tool."
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 12,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a555c10016KlvbHXvSepyXL",
+   "created": 1791163192769,
+   "type": "session.step.streamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 13,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a555c4002p2TJwWHUJC8o0K",
+   "created": 1791163192772,
+   "type": "permission.asked",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "id": "per_109a555c4001di5y1wRAPI9NVt",
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "action": "external_directory",
+    "resources": [
+     "/tmp/*"
+    ],
+    "save": [
+     "/tmp/*"
+    ],
+    "source": {
+     "type": "tool",
+     "messageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+     "id": "call_00_PwrjLasBlFW9FnuDAdVQ6220"
+    }
+   }
+  },
+  {
+   "id": "evt_109a555c7001KdTngU8SS9Yyj8",
+   "created": 1791163192775,
+   "type": "permission.replied",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "requestID": "per_109a555c4001di5y1wRAPI9NVt",
+    "reply": "reject"
+   }
+  },
+  {
+   "id": "evt_109a555c8001nroiDeVUholA2S",
+   "created": 1791163192776,
+   "type": "session.tool.failed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "id": "call_00_PwrjLasBlFW9FnuDAdVQ6220",
+    "error": {
+     "type": "permission.rejected",
+     "message": "Headless companion run: rejected."
+    },
+    "executed": false
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 14,
+    "version": 2
+   }
+  },
+  {
+   "id": "evt_109a555e9001GXCtKY7GsGvG5w",
+   "created": 1791163192809,
+   "type": "session.step.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "finish": "tool-calls",
+    "rawFinish": "tool_calls",
+    "cost": 0.000513304,
+    "tokens": {
+     "input": 159,
+     "output": 101,
+     "reasoning": 0,
+     "cache": {
+      "read": 9472,
+      "write": 0
+     }
+    },
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "files": []
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 15,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a555eb001WJ6co1y1IKozwh",
+   "created": 1791163192811,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "cost": 0.000573408,
+    "tokens": {
+     "input": 218,
+     "output": 106,
+     "reasoning": 0,
+     "cache": {
+      "read": 9984,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a55a30001D9cyZltWhqnbp4",
+   "created": 1791163193904,
+   "type": "session.step.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "started": 1791163192852
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 16,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a55a34001TO95e4DXKG9akj",
+   "created": 1791163193908,
+   "type": "session.text.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "ordinal": 0
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 17,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a55a9b001ekvaiXwSwGxcyA",
+   "created": 1791163194011,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "ordinal": 0,
+    "delta": "I wasn"
+   }
+  },
+  {
+   "id": "evt_109a55b10001bn1LEQompG0mKX",
+   "created": 1791163194128,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "ordinal": 0,
+    "delta": "'t able to create the file. The write tool rejected the request with a `"
+   }
+  },
+  {
+   "id": "evt_109a55b7f001MyNMrz1ZoEAldc",
+   "created": 1791163194239,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "ordinal": 0,
+    "delta": "permission.rejected` error"
+   }
+  },
+  {
+   "id": "evt_109a55c4400199bqn70AtfgzWp",
+   "created": 1791163194436,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "ordinal": 0,
+    "delta": " (\"Headless companion run: rejected\"), so the file `/tmp/wv"
+   }
+  },
+  {
+   "id": "evt_109a55cb2001MwxtMG1LZHU5BG",
+   "created": 1791163194546,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "ordinal": 0,
+    "delta": "/T/workspacee.txt` was not created. No file"
+   }
+  },
+  {
+   "id": "evt_109a55cba001JAbakyyvSkHUz7",
+   "created": 1791163194554,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "ordinal": 0,
+    "delta": " was written."
+   }
+  },
+  {
+   "id": "evt_109a55cbb001K8FflXk7AozDdB",
+   "created": 1791163194555,
+   "type": "session.text.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "ordinal": 0,
+    "text": "I wasn't able to create the file. The write tool rejected the request with a `permission.rejected` error (\"Headless companion run: rejected\"), so the file `/tmp/workspace.txt` was not created. No file was written."
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 18,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a55cbe001hGpiibcLclUPn1",
+   "created": 1791163194558,
+   "type": "session.step.streamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 19,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a55ce7001NdUwPGCzoiNRXU",
+   "created": 1791163194599,
+   "type": "session.step.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "assistantMessageID": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "finish": "stop",
+    "rawFinish": "stop",
+    "cost": 0.000398816,
+    "tokens": {
+     "input": 40,
+     "output": 80,
+     "reasoning": 0,
+     "cache": {
+      "read": 9728,
+      "write": 0
+     }
+    },
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "files": []
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 20,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a55ce9001Y0FW5l2zNiG6gQ",
+   "created": 1791163194601,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "cost": 0.000972224,
+    "tokens": {
+     "input": 258,
+     "output": 186,
+     "reasoning": 0,
+     "cache": {
+      "read": 19712,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a55ce90026UYb9htcTLQ5et",
+   "created": 1791163194601,
+   "type": "session.execution.succeeded",
+   "data": {
+    "sessionID": "ses_ef65ab078ffepZrl8jHMp43D8s"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ab078ffepZrl8jHMp43D8s",
+    "seq": 21,
+    "version": 1
+   }
+  }
+ ],
+ "messages": {
+  "data": [
+   {
+    "id": "msg_109a55ce90026UYb9htcTLQ5et",
+    "time": {
+     "created": 1791163194601
+    },
+    "type": "idle",
+    "outcome": "succeeded"
+   },
+   {
+    "id": "msg_109a555f0001gh8dsJi9HHdWwg",
+    "time": {
+     "created": 1791163192852,
+     "streamed": 1791163194558,
+     "completed": 1791163194599
+    },
+    "type": "assistant",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "content": [
+     {
+      "type": "text",
+      "text": "I wasn't able to create the file. The write tool rejected the request with a `permission.rejected` error (\"Headless companion run: rejected\"), so the file `/tmp/workspace.txt` was not created. No file was written."
+     }
+    ],
+    "snapshot": {
+     "start": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "end": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "files": []
+    },
+    "finish": "stop",
+    "rawFinish": "stop",
+    "cost": 0.000398816,
+    "tokens": {
+     "input": 40,
+     "output": 80,
+     "reasoning": 0,
+     "cache": {
+      "read": 9728,
+      "write": 0
+     }
+    }
+   },
+   {
+    "id": "msg_109a54fc3001jdKWiRSZrzySB0",
+    "time": {
+     "created": 1791163191267,
+     "streamed": 1791163192769,
+     "completed": 1791163192809
+    },
+    "type": "assistant",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "content": [
+     {
+      "type": "text",
+      "text": "I'll create that file using the write tool."
+     },
+     {
+      "type": "tool",
+      "id": "call_00_PwrjLasBlFW9FnuDAdVQ6220",
+      "name": "write",
+      "executed": false,
+      "state": {
+       "status": "error",
+       "input": {
+        "path": "/tmp/workspace.txt",
+        "content": "hi"
+       },
+       "error": {
+        "type": "permission.rejected",
+        "message": "Headless companion run: rejected."
+       }
+      },
+      "time": {
+       "created": 1791163192374,
+       "ran": 1791163192768,
+       "completed": 1791163192776
+      }
+     }
+    ],
+    "snapshot": {
+     "start": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "end": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "files": []
+    },
+    "finish": "tool-calls",
+    "rawFinish": "tool_calls",
+    "cost": 0.000513304,
+    "tokens": {
+     "input": 159,
+     "output": 101,
+     "reasoning": 0,
+     "cache": {
+      "read": 9472,
+      "write": 0
+     }
+    }
+   },
+   {
+    "id": "msg_109a54fb7001wkhhrYCtQiYaX9",
+    "time": {
+     "created": 1791163191229
+    },
+    "text": "Use the write tool to create the file /tmp/workspace.txt containing the word hi. Do not use bash.",
+    "type": "user"
+   }
+  ],
+  "cursor": {
+   "previous": "eyJpZCI6Im1zZ18xMDlhNTVjZTkwMDI2VVliOWh0Y1RMUTVldCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+   "next": "eyJpZCI6Im1zZ18xMDlhNTRmYjcwMDF3a2hocllDdFFpWWFYOSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+  }
+ },
+ "permissions": {
+  "data": []
+ },
+ "forms": {
+  "data": []
+ }
+}
