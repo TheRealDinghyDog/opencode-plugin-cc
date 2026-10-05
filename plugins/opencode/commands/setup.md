@@ -1,7 +1,7 @@
 ---
 description: Check whether the local OpenCode CLI is ready and optionally toggle the fail-closed stop-time review gate
 argument-hint: '[--enable-review-gate|--disable-review-gate]'
-allowed-tools: Bash(node:*), Bash(npm:*), AskUserQuestion
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" *), Bash(npm install -g opencode-ai), AskUserQuestion
 ---
 
 Run:

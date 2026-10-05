@@ -40,3 +40,35 @@ jobs:
 
       - name: Run test suite
         run: npm test
+
+  allowed-tools:
+    # Runs real Claude Code headless against the plugin to prove each command's
+    # allowed-tools rule approves its inline `!` invocation and nothing broader.
+    # No API key: the check finishes before Claude Code would call the model.
+    name: allowed-tools (Claude Code ${{ matrix.claude-code }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        claude-code: [2.1.289]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        shell: bash
+        run: |
+          npm install -g "@anthropic-ai/claude-code@${{ matrix.claude-code }}"
+          # Spawn the native binary directly; the Windows npm shim is a .cmd.
+          echo "CLAUDE_BIN=$(npm root -g)/@anthropic-ai/claude-code/bin/claude.exe" >> "$GITHUB_ENV"
+
+      - name: Check allowed-tools against Claude Code
+        run: npm run check-allowed-tools

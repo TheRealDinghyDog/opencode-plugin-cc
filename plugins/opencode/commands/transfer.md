@@ -2,7 +2,7 @@
 description: Transfer the current Claude Code session into a resumable OpenCode thread
 argument-hint: "[--source <claude-jsonl>]"
 disable-model-invocation: true
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" *)
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" transfer "$ARGUMENTS"`
