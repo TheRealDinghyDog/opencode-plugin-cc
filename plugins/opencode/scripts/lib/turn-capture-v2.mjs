@@ -306,6 +306,17 @@ async function answerAsk(client, state, ask) {
       await client.cancelForm(ask.sessionID, ask.formID);
     }
   } catch (error) {
+    // Already settled: once one request of a step is rejected or a form is
+    // dismissed, OpenCode drops the rest and answers 404 (or 409 for a settled
+    // form). Nothing waits on it, so the turn goes on (issue #63).
+    if (error?.status === 404 || error?.status === 409) {
+      progress(
+        state,
+        `OpenCode ${ask.type === "cancel-form" ? `question ${ask.formID}` : `permission request ${ask.requestID}`} was no longer pending (HTTP ${error.status}).`,
+        "running"
+      );
+      return;
+    }
     // An unanswered ask would hold the turn until the timeout.
     state.error = error;
     progress(state, `OpenCode ${ask.type === "cancel-form" ? "question" : "permission"} response failed: ${error.message}`, "failed");

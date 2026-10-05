@@ -303,6 +303,19 @@ async function handleMessage(req, res, sessionID) {
       always: ["/outside/workspace/secret.txt"],
       tool: { messageID, callID: "call_edit_1" }
     });
+    if (process.env.FAKE_OPENCODE_SECOND_PERMISSION_GONE === "1") {
+      // A second request in the same step. Like a real 1.18 server (#63), it
+      // is dropped once the first is rejected: replying to it gets 404.
+      emit("permission.asked", {
+        id: permissionID + "_gone",
+        sessionID,
+        permission: "external_directory",
+        patterns: ["/outside/other/*"],
+        metadata: {},
+        always: ["/outside/other/*"],
+        tool: { messageID, callID: "call_edit_2" }
+      });
+    }
     const reply = await waitForPermission(permissionID);
     if (reply && reply.response !== "reject") {
       emit("file.edited", { file: "/outside/workspace/secret.txt" });
@@ -687,6 +700,10 @@ const server = http.createServer(async (req, res) => {
     const state = loadState();
     state.permissions.push({ sessionID, permissionID, body });
     saveState(state);
+    if (permissionID.endsWith("_gone")) {
+      sendJson(res, { name: "NotFoundError", data: { message: "Permission request not found" } }, 404);
+      return;
+    }
     const resolve = pendingPermissions.get(permissionID);
     pendingPermissions.delete(permissionID);
     resolve?.(body);
