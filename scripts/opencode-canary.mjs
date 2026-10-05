@@ -408,6 +408,38 @@ async function checkV2Server(server, contract, workspace, record) {
   record("2.x event stream", event.ok ? "pass" : "fail", event.detail);
 }
 
+// A channel is only worth testing at its current release: GitHub's macOS
+// images ship with Homebrew auto-update off, and a stale formula once made
+// the "homebrew" job test 1.18.20 while users were getting 2.0.20.
+const CHANNEL_LATEST = {
+  "npm-latest": () => {
+    const result = spawnSync("npm", ["view", "opencode-ai", "version"], { encoding: "utf8", timeout: 60 * 1000 });
+    return String(result.stdout ?? "").trim() || null;
+  },
+  homebrew: () => {
+    const result = spawnSync("brew", ["info", "--json=v2", "opencode"], { encoding: "utf8", timeout: 60 * 1000 });
+    try {
+      return JSON.parse(result.stdout).formulae[0].versions.stable ?? null;
+    } catch {
+      return null;
+    }
+  }
+};
+
+function checkChannelFreshness(channel, installedVersion, record) {
+  const latest = CHANNEL_LATEST[channel]?.();
+  if (latest === undefined) {
+    return;
+  }
+  if (!latest) {
+    record("channel is current", "notice", `could not look up the latest ${channel} version`);
+  } else if (parseOpencodeVersionInfo(latest)?.version !== installedVersion) {
+    record("channel is current", "fail", `installed ${installedVersion}, but ${channel} currently ships ${latest}`);
+  } else {
+    record("channel is current", "pass", `${channel} currently ships ${latest}`);
+  }
+}
+
 function runCompanion(args, workspace, env, timeout) {
   return spawnSync(process.execPath, [COMPANION, ...args], {
     cwd: workspace,
@@ -505,6 +537,7 @@ export async function runCanary(options = {}) {
       return finishReport({ channel, checks, versionInfo, contract });
     }
     record("opencode --version", "pass", versionInfo.version);
+    checkChannelFreshness(channel, versionInfo.version, record);
     const contractFile = CONTRACT_FILES[versionInfo.major];
     contract = contractFile ? JSON.parse(fs.readFileSync(contractFile, "utf8")) : null;
 
