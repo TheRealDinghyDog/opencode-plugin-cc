@@ -101,6 +101,34 @@ test("a write task rejects a guarded permission ask and never writes outside the
   }
 });
 
+// Issue #84: the event stream drops right before an ask. The ask shows up
+// only in the pending lists, and recovery must still answer it by policy.
+test("after a stream drop, a 2.x permission request is still rejected", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("permission", { FAKE_OPENCODE_V2_DROP_BEFORE_ASK: "1" });
+  try {
+    const result = companion(ctx, ["task", "--write", "write outside the workspace"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Handled the requested task/);
+    const state = readFakeState(ctx.binDir);
+    assert.deepEqual(state.permissionReplies.map((reply) => reply.body.decision), ["reject"]);
+    assert.equal(state.outsideWrites, 0);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("after a stream drop, a 2.x question is still handed back", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("form", { FAKE_OPENCODE_V2_DROP_BEFORE_ASK: "1" });
+  try {
+    const asked = companion(ctx, ["task", "decide something"]);
+    assert.notEqual(asked.status, 0);
+    assert.match(asked.stdout, /OpenCode stopped to ask a question[\s\S]*Which approach should I take\?\n- Option A\n- Option B/);
+    assert.deepEqual(readFakeState(ctx.binDir).formActions.map((action) => action.action), ["cancel"]);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
 test("a 2.x question is handed back with its options, and resuming with the answer finishes the job", { skip: LOCAL_LISTEN_SKIP }, () => {
   const ctx = setup("form");
   try {
@@ -208,6 +236,32 @@ test("--effort without --model asks for the model on 2.x instead of guessing one
     assert.notEqual(result.status, 0);
     assert.match(`${result.stdout}${result.stderr}`, /On OpenCode 2\.x, --effort needs --model provider\/model as well/);
     assert.equal(readFakeState(ctx.binDir).prompts.length, 0);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+// Issue #86: 2.x keeps the agent on the session. A read-only follow-up to a
+// write task must not keep the write-capable agent, and vice versa.
+test("resuming a 2.x session switches it to the agent the follow-up asks for", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup();
+  try {
+    assert.equal(companion(ctx, ["task", "--write", "make the change"]).status, 0);
+    const readOnly = companion(ctx, ["task", "--resume-last", "now just explain it"]);
+    assert.equal(readOnly.status, 0, readOnly.stderr);
+    const write = companion(ctx, ["task", "--resume-last", "--write", "apply the fix after all"]);
+    assert.equal(write.status, 0, write.stderr);
+
+    const state = readFakeState(ctx.binDir);
+    assert.equal(state.sessions.length, 1);
+    assert.deepEqual(
+      state.prompts.map((prompt) => prompt.agent),
+      ["build", "plan", "build"]
+    );
+    assert.deepEqual(
+      state.agentChanges.map((change) => change.agent),
+      ["plan", "build"]
+    );
   } finally {
     cleanup(ctx);
   }
@@ -395,6 +449,41 @@ test("a 2.x review sends the schema in the prompt and reads JSON out of the repl
     const prompts = readFakeState(ctx.binDir).prompts;
     assert.equal(prompts.length, 1);
     assert.match(prompts[0].body.text, /<output_schema>[\s\S]*"next_steps"[\s\S]*<\/output_schema>/);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+// Issue #89: findings given as strings passed the old top-level check and
+// rendered as "Finding 1 / No details provided.", losing what they said.
+const MALFORMED_REVIEW = { ...REVIEW, findings: ["Deleting the cache wipes user data on every start."] };
+
+test("a 2.x review with malformed findings gets one repair turn", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", {
+    FAKE_OPENCODE_V2_REPLY_SEQUENCE: JSON.stringify([JSON.stringify(MALFORMED_REVIEW), JSON.stringify(REVIEW)])
+  });
+  try {
+    changeReadme(ctx);
+    const result = companion(ctx, ["review", "--json"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).result, REVIEW);
+    const prompts = readFakeState(ctx.binDir).prompts;
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1].body.text, /findings\[0\] is not an object/);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("a 2.x review whose findings stay malformed is shown raw, never as empty findings", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const malformed = JSON.stringify(MALFORMED_REVIEW);
+  const ctx = setup("success", { FAKE_OPENCODE_V2_REPLY_SEQUENCE: JSON.stringify([malformed, malformed]) });
+  try {
+    changeReadme(ctx);
+    const result = companion(ctx, ["review"]);
+    assert.match(result.stdout, /unexpected review shape[\s\S]*Finding 1 is not an object with a title and body/);
+    assert.match(result.stdout, /Deleting the cache wipes user data on every start\./);
+    assert.doesNotMatch(result.stdout, /No details provided/);
   } finally {
     cleanup(ctx);
   }

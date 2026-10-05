@@ -22,6 +22,9 @@
 //
 // FAKE_OPENCODE_V2_IGNORE_INTERRUPT=1 records interrupts without stopping the
 // turn, so a cancelled worker is still running when cancel ends it (#77).
+//
+// FAKE_OPENCODE_V2_DROP_BEFORE_ASK=1 ends every event stream right before a
+// permission request or question, and sends no further events (#84).
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -201,7 +204,22 @@ function startServer(args) {
   let seq = 0;
   const id = (prefix) => `${prefix}_fake${String(nextId++).padStart(6, "0")}`;
 
+  let streamsDropped = false;
+  function dropStreams() {
+    streamsDropped = true;
+    for (const client of clients) {
+      client.end();
+    }
+    clients.clear();
+  }
+
   function emit(type, data, sessionID = data?.sessionID) {
+    if (process.env.FAKE_OPENCODE_V2_DROP_BEFORE_ASK === "1" && (type === "permission.asked" || type === "form.created")) {
+      dropStreams();
+    }
+    if (streamsDropped) {
+      return;
+    }
     const session = sessions.get(sessionID);
     const event = {
       id: id("evt"),
@@ -577,6 +595,21 @@ function startServer(args) {
         sendJson(res, { data: session ?? null });
       }
     ],
+    [
+      "POST",
+      /^\/api\/session\/([^/]+)\/agent$/,
+      async (req, res, [sessionID]) => {
+        const body = await readJson(req);
+        const session = sessions.get(sessionID);
+        if (session) {
+          session.agent = body.agent;
+        }
+        updateState((state) => {
+          state.agentChanges = [...(state.agentChanges ?? []), { sessionID, agent: body.agent }];
+        });
+        sendJson(res, { data: session ?? null });
+      }
+    ],
     ["GET", /^\/api\/provider$/, (req, res) => sendJson(res, { data: [{ id: "fake", name: "Fake" }] })],
     [
       "GET",
@@ -630,7 +663,7 @@ function startServer(args) {
         }
         const body = await readJson(req);
         updateState((state) => {
-          state.prompts.push({ sessionID, body });
+          state.prompts.push({ sessionID, body, agent: session.agent });
         });
         const inbox = { id: id("msg"), sessionID, time: { created: Date.now() }, type: "user", payload: { text: body.text }, delivery: "steer" };
         sendJson(res, { data: inbox });

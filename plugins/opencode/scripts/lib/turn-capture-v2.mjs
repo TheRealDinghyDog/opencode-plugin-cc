@@ -78,6 +78,9 @@ export function createV2TurnState(sessionID, options = {}) {
     childLabels: new Map(),
     nextChildIndex: 1,
     seen: new Set(),
+    // Permission requests and forms already answered, by id: after a stream
+    // drop they can also turn up in the pending lists (issue #84).
+    askIDs: new Set(),
     // Main-session steps in arrival order, each step's text, and the input
     // (inbox item) each step answers.
     steps: [],
@@ -235,6 +238,10 @@ export function applyV2Event(state, event) {
       }
       break;
     case "permission.asked": {
+      if (state.askIDs.has(data.id)) {
+        break;
+      }
+      state.askIDs.add(data.id);
       const target = (Array.isArray(data.resources) ? data.resources : []).join(", ");
       progress(
         state,
@@ -246,6 +253,10 @@ export function applyV2Event(state, event) {
     }
     case "form.created": {
       const form = data.form ?? {};
+      if (state.askIDs.has(form.id)) {
+        break;
+      }
+      state.askIDs.add(form.id);
       const titles = (Array.isArray(form.fields) ? form.fields : [])
         .map((field) => field?.description || field?.title)
         .filter(Boolean)
@@ -324,6 +335,27 @@ async function answerAsk(client, state, ask) {
   }
 }
 
+// After the event stream drops, a permission request or question raised since
+// then shows up only in the session's pending lists, and an unanswered one
+// holds the turn until the timeout (issue #84). Each pending item goes through
+// the same policy as its event: the list items are the events' payloads.
+export async function pendingAsksAfterDrop(client, state) {
+  const asks = [];
+  for (const sessionID of state.sessionIDs) {
+    const [permissions, forms] = await Promise.all([
+      client.listPermissions(sessionID).catch(() => []),
+      client.listForms(sessionID).catch(() => [])
+    ]);
+    for (const request of permissions) {
+      asks.push(...applyV2Event(state, { type: "permission.asked", data: request }));
+    }
+    for (const form of forms) {
+      asks.push(...applyV2Event(state, { type: "form.created", data: { form } }));
+    }
+  }
+  return asks;
+}
+
 function assistantText(item) {
   return (Array.isArray(item?.content) ? item.content : [])
     .filter((part) => part?.type === "text" && typeof part.text === "string")
@@ -357,7 +389,11 @@ export async function recoverV2Turn(client, state, options = {}) {
   if (!idle) {
     return false;
   }
-  if (!state.finalMessage) {
+  // While streaming, the answer can be provisional: the text of a step that
+  // went on to call tools ("I'll create that file"). Unless the stream already
+  // saw a complete ("stop") reply, take the answer from the stored items
+  // (issue #88). Stored assistant items carry the streamed step ids.
+  if (!state.finalMessage || state.stepFinish.get(state.finalMessageID) !== "stop") {
     // The same rule as refreshFinalMessage, on the stored items: walking
     // forward from our prompt, the replies before the next input (a reminder,
     // a queued message) are ours; prefer a complete ("stop") reply.
@@ -471,6 +507,9 @@ export async function captureV2Turn(client, sessionID, prompt, options = {}) {
     // poll the message list until it shows how the turn ended.
     const streamDropRecovery = eventStream.then(async () => {
       while (!state.completed && !timedOut) {
+        for (const ask of await pendingAsksAfterDrop(client, state)) {
+          await answerAsk(client, state, ask);
+        }
         await recoverV2Turn(client, state, options);
         if (state.completed || timedOut) {
           break;

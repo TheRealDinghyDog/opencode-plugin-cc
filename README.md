@@ -310,6 +310,10 @@ OpenCode 2.x support is experimental. All the plugin's commands support 2.x, wit
 
 Your OpenCode default: the `model` setting in your OpenCode config (`opencode.json`), or OpenCode's own choice when you haven't set one. Pass `--model provider/model` to pick one for a single command.
 
+### Does every model work for reviews?
+
+Reviews need the model to return the review as JSON. On OpenCode 1.x, the plugin first asks for structured output, which OpenCode implements by forcing a tool call. Some models refuse forced tool calls: DeepSeek's thinking mode answers "Thinking mode does not support this tool_choice". When that happens, the plugin asks for the JSON in the reply text instead, the way it always does on 2.x, so the review still works. If a model can't produce valid JSON even then, the review shows its raw reply.
+
 ### Do I need a separate OpenCode account for this plugin?
 
 If you are already signed into OpenCode on this machine, that account should work immediately here too. This plugin uses your local OpenCode CLI authentication. OpenCode 2.x keeps its logins separately from 1.x: see [OpenCode 2.x](#opencode-2x).

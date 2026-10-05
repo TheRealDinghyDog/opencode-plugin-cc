@@ -133,6 +133,28 @@ function recoveryClient(items) {
   return { listMessages: async () => items };
 }
 
+// Issue #88: the stream drops after a step that narrated and then called a
+// tool. Its text is only provisional; the stored "stop" reply is the answer.
+test("recovery replaces provisional streamed text with the stored final reply", async () => {
+  const recording = JSON.parse(fs.readFileSync(path.join(RECORDINGS, "external-write.json"), "utf8"));
+  const state = createV2TurnState(recording.sid);
+  for (const event of recording.events) {
+    applyV2Event(state, event);
+    if (event.type === "session.step.ended" && event.data.finish === "tool-calls") {
+      break;
+    }
+  }
+  const prompt = recording.events.find(
+    (event) => event.type === "session.inbox.enqueued" && event.data.sessionID === recording.sid && event.data.item.type === "user"
+  );
+  setV2PromptID(state, prompt.data.inboxID);
+  assert.match(state.finalMessage, /^I'll create that file/);
+
+  assert.equal(await recoverV2Turn(recoveryClient(recording.messages.data), state), true);
+  assert.equal(state.outcome, "succeeded");
+  assert.match(state.finalMessage, /^I wasn't able to create the file/);
+});
+
 test("recovery reads how the turn ended from the message list", async () => {
   const state = createV2TurnState("ses_1");
   state.promptID = "msg_prompt";

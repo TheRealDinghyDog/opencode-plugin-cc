@@ -13,6 +13,7 @@
     { "method": "POST", "path": "/api/session" },
     { "method": "DELETE", "path": "/api/session/{sessionID}" },
     { "method": "POST", "path": "/api/session/{sessionID}/prompt" },
+    { "method": "POST", "path": "/api/session/{sessionID}/agent" },
     { "method": "POST", "path": "/api/session/{sessionID}/model" },
     { "method": "GET", "path": "/api/session/{sessionID}/message" },
     { "method": "POST", "path": "/api/session/{sessionID}/interrupt" },
@@ -25,6 +26,7 @@
   "requests": {
     "POST /api/session": { "sends": ["title", "agent", "model", "location"] },
     "POST /api/session/{sessionID}/prompt": { "sends": ["text"] },
+    "POST /api/session/{sessionID}/agent": { "sends": ["agent"] },
     "POST /api/session/{sessionID}/model": { "sends": ["model"] },
     "POST /api/session/{sessionID}/permission/{requestID}/reply": { "sends": ["decision", "message"] },
     "POST /api/experimental/session/import": { "sends": ["info", "messages", "location"] }
