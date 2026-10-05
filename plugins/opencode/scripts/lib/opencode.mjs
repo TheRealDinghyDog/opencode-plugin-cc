@@ -1353,6 +1353,33 @@ function extractConnectedProviderIds(provider) {
     .filter(Boolean);
 }
 
+// 2.x lists stored logins at /api/credential; its /api/provider list stays
+// empty on a real setup, and the model routes are still loading right after
+// the server starts (#82). Only the integration ids and `active` are read:
+// each entry also carries the secret itself.
+async function getV2AuthStatus(client) {
+  const credentials = await client.listCredentials();
+  const logins = [
+    ...new Set(credentials.filter((credential) => credential?.active === true).map((credential) => credential.integrationID))
+  ].filter((id) => typeof id === "string" && id);
+  if (logins.length === 0) {
+    return buildAuthStatus({
+      loggedIn: false,
+      detail:
+        "No stored OpenCode 2.x login. Log in with `opencode auth login <provider>`, then rerun /opencode:setup (API keys in the environment work too).",
+      source: "server",
+      available: true,
+      provider: null
+    });
+  }
+  return buildAuthStatus({
+    loggedIn: true,
+    detail: `OpenCode 2.x logins: ${logins.join(", ")}`,
+    source: "server",
+    provider: logins[0]
+  });
+}
+
 export async function getAuthStatus(cwd) {
   const availability = getAvailability(cwd);
   if (!availability.available) {
@@ -1364,7 +1391,10 @@ export async function getAuthStatus(cwd) {
   }
 
   try {
-    return await withServer(cwd, async (client) => {
+    return await withServer(cwd, async (client, server) => {
+      if (server.api === OPENCODE_V2_MAJOR) {
+        return getV2AuthStatus(client);
+      }
       const [config, provider] = await Promise.all([
         client.getConfig().catch((error) => ({ error })),
         client.getProvider().catch((error) => ({ error }))

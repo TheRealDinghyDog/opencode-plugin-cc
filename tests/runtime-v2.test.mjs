@@ -9,7 +9,7 @@ import { extractJsonObject } from "../plugins/opencode/scripts/lib/opencode.mjs"
 import { saveState } from "../plugins/opencode/scripts/lib/state.mjs";
 import { HEADLESS_PERMISSION_MESSAGE } from "../plugins/opencode/scripts/lib/turn-capture-v2.mjs";
 import { readFakeState } from "./fake-opencode-fixture.mjs";
-import { installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
+import { FAKE_SECRET, installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 
 // The companion's commands, end to end, against the fake OpenCode 2.x
@@ -261,6 +261,45 @@ test("cancelling one background job leaves the server another job uses", { skip:
     const cancelSecond = companion(ctx, ["cancel", second, "--json"]);
     assert.equal(cancelSecond.status, 0, cancelSecond.stderr);
     assert.deepEqual(readFakeState(ctx.binDir).interrupts, [firstSession, secondSession]);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+// #56: setup on 2.x reads stored logins, not providers or models (#82), and
+// never shows a credential's secret, which the route returns with each entry.
+test("setup on 2.x reports its logins, labelled experimental, without any secret", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success");
+  try {
+    const json = companion(ctx, ["setup", "--json"]);
+    assert.equal(json.status, 0, json.stderr);
+    const report = JSON.parse(json.stdout);
+    assert.equal(report.ready, true);
+    assert.equal(report.opencode.experimental, true);
+    assert.match(report.opencode.detail, /OpenCode 2\.x support is experimental/);
+    assert.equal(report.auth.detail, "OpenCode 2.x logins: fake");
+    assert.ok(report.notes.some((note) => /opencode auth login/.test(note)));
+
+    const rendered = companion(ctx, ["setup"]);
+    assert.equal(rendered.status, 0, rendered.stderr);
+    assert.match(rendered.stdout, /Notes:\n- OpenCode 2\.x support is experimental/);
+    for (const output of [json.stdout, json.stderr, rendered.stdout, rendered.stderr]) {
+      assert.ok(!output.includes(FAKE_SECRET), "a credential secret reached setup's output");
+    }
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("setup on 2.x without a stored login says how to log in", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", { FAKE_OPENCODE_V2_NO_CREDENTIALS: "1" });
+  try {
+    const result = companion(ctx, ["setup", "--json"]);
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ready, false);
+    assert.match(report.auth.detail, /No stored OpenCode 2\.x login/);
+    assert.ok(report.nextSteps.some((step) => /opencode auth login <provider>/.test(step)));
   } finally {
     cleanup(ctx);
   }

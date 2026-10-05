@@ -52,6 +52,7 @@ import(${JSON.stringify(moduleUrl)})
 }
 
 const DEFAULT_REPLY = "Handled the requested task.\nTask prompt accepted.";
+export const FAKE_SECRET = "sk-fake-secret-must-never-show";
 const MODEL = { id: "fake-model", providerID: "fake", variant: "none" };
 
 function statePath() {
@@ -572,7 +573,21 @@ function startServer(args) {
       }
     ],
     ["GET", /^\/api\/provider$/, (req, res) => sendJson(res, { data: [{ id: "fake", name: "Fake" }] })],
-    ["GET", /^\/api\/credential$/, (req, res) => sendJson(res, { data: [{ id: "cred_fake", integrationID: "fake", active: true }] })],
+    [
+      "GET",
+      /^\/api\/credential$/,
+      (req, res) =>
+        sendJson(res, {
+          // Like the real route, each entry carries the secret; the plugin must never show it.
+          data:
+            process.env.FAKE_OPENCODE_V2_NO_CREDENTIALS === "1"
+              ? []
+              : [
+                  { id: "cred_fake", integrationID: "fake", label: "API key", active: true, value: { type: "key", key: FAKE_SECRET } },
+                  { id: "cred_old", integrationID: "stale", label: "API key", active: false, value: { type: "key", key: FAKE_SECRET } }
+                ]
+        })
+    ],
     // Like the real 2.0.20 server, the list ignores the location filter.
     ["GET", /^\/api\/session$/, (req, res) => sendJson(res, { data: [...sessions.values()].reverse() })],
     [

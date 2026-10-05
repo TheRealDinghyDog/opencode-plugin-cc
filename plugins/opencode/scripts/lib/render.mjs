@@ -203,6 +203,14 @@ export function renderSetupReport(report) {
     for (const step of report.nextSteps) {
       lines.push(`- ${step}`);
     }
+    lines.push("");
+  }
+
+  if (report.notes?.length > 0) {
+    lines.push("Notes:");
+    for (const note of report.notes) {
+      lines.push(`- ${note}`);
+    }
   }
 
   return `${lines.join("\n").trimEnd()}\n`;

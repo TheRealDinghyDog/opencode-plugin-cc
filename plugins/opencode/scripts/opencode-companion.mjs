@@ -192,7 +192,17 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     );
   }
   if (opencodeStatus.available && !authStatus.loggedIn) {
-    nextSteps.push("Configure an OpenCode provider, then rerun `/opencode:setup`.");
+    nextSteps.push(
+      opencodeStatus.experimental
+        ? "Log in to a provider with `opencode auth login <provider>`, then rerun `/opencode:setup`."
+        : "Configure an OpenCode provider, then rerun `/opencode:setup`."
+    );
+  }
+  const notes = [];
+  if (opencodeStatus.experimental) {
+    notes.push(
+      "OpenCode 2.x support is experimental. 2.x keeps its own logins, separate from OpenCode 1.x and the desktop app: if a provider rejects requests, log in again with `opencode auth login <provider>`."
+    );
   }
   if (!config.stopReviewGate) {
     nextSteps.push(
@@ -209,7 +219,8 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
     reviewGateEnabled: Boolean(config.stopReviewGate),
     actionsTaken,
-    nextSteps
+    nextSteps,
+    notes
   };
 }
 
