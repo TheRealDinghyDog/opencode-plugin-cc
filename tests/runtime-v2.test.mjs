@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { HEADLESS_PERMISSION_MESSAGE, HEADLESS_QUESTION_MESSAGE } from "../plugins/opencode/scripts/lib/turn-capture-v2.mjs";
+import { HEADLESS_PERMISSION_MESSAGE } from "../plugins/opencode/scripts/lib/turn-capture-v2.mjs";
 import { readFakeState } from "./fake-opencode-fixture.mjs";
 import { installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
@@ -99,12 +99,48 @@ test("a write task rejects a guarded permission ask and never writes outside the
   }
 });
 
-test("a question ends the 2.x turn with an explanation instead of stalling", { skip: LOCAL_LISTEN_SKIP }, () => {
+test("a 2.x question is handed back with its options, and resuming with the answer finishes the job", { skip: LOCAL_LISTEN_SKIP }, () => {
   const ctx = setup("form");
   try {
-    const result = companion(ctx, ["task", "decide something"]);
-    assert.match(result.stdout, new RegExp(`OpenCode error: ${HEADLESS_QUESTION_MESSAGE.replace(/[.?()]/g, "\\$&")}`));
+    const asked = companion(ctx, ["task", "decide something"]);
+    assert.notEqual(asked.status, 0);
+    assert.equal(
+      asked.stdout,
+      [
+        "OpenCode stopped to ask a question, which this run can't answer interactively:",
+        "",
+        "Which approach should I take?",
+        "- Option A",
+        "- Option B",
+        "- (or another answer)",
+        "",
+        "To continue, resume this OpenCode session with the answer, for example:",
+        "/opencode:rescue --resume <answer>",
+        ""
+      ].join("\n")
+    );
     assert.deepEqual(readFakeState(ctx.binDir).formActions.map((action) => action.action), ["cancel"]);
+    const status = JSON.parse(companion(ctx, ["status", "--all", "--json"]).stdout);
+    assert.equal((status.latestFinished ?? status.recent[0]).phase, "awaiting-answer");
+
+    const resumed = companion(ctx, ["task", "--resume-last", "Option B"]);
+    assert.equal(resumed.status, 0, resumed.stderr);
+    assert.match(resumed.stdout, /Handled the requested task/);
+    const state = readFakeState(ctx.binDir);
+    assert.equal(state.sessions.length, 1);
+    assert.deepEqual(state.prompts.map((prompt) => prompt.body.text), ["decide something", "Option B"]);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("a 2.x question is in the --json payload", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("form");
+  try {
+    const payload = JSON.parse(companion(ctx, ["task", "--json", "decide something"]).stdout);
+    assert.equal(payload.status, 1);
+    assert.equal(payload.question.fields[0].question, "Which approach should I take?");
+    assert.deepEqual(payload.question.fields[0].options.map((option) => option.label), ["Option A", "Option B"]);
   } finally {
     cleanup(ctx);
   }

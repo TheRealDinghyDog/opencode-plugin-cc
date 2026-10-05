@@ -73,6 +73,21 @@ test("a question form is dismissed and the interrupted turn explains why", () =>
   assert.equal(state.error.message, HEADLESS_QUESTION_MESSAGE);
   // Partial text from before the question is kept.
   assert.equal(state.finalMessage, "I'll ask you that question now.");
+  // The question travels on, so Claude can answer it by resuming.
+  assert.deepEqual(state.question, {
+    title: "Questions",
+    fields: [
+      {
+        key: "q0",
+        question: "Do you prefer red or blue?",
+        options: [
+          { label: "Red", description: "You prefer the color red." },
+          { label: "Blue", description: "You prefer the color blue." }
+        ],
+        custom: true
+      }
+    ]
+  });
 });
 
 test("an interrupted turn keeps its partial text and reports the reason", () => {
@@ -167,37 +182,54 @@ test("recovery reports a failed turn as an error", async () => {
   assert.equal(state.error.message, "OpenCode turn failed.");
 });
 
-// Observed on 2.0.20: the plan agent's reminder was queued after our prompt,
-// delivered mid-execution, and answered; the reply to it is not our answer.
-function lateReminderEvents() {
+// Both orders were seen live on 2.0.20. The plan agent's reminder is queued
+// asynchronously and can be delivered mid-execution:
+// - after our prompt already got its complete ("stop") reply, and the
+//   reminder gets a reply of its own, which is not our answer;
+// - while our prompt's first step was still working (no text yet), and the
+//   model answers our prompt in the step after the reminder.
+function reminderEvents(firstStep, secondStep) {
   let n = 0;
   const event = (type, data) => ({ id: `evt_${++n}`, type, data: { sessionID: "ses_1", ...data } });
+  const step = (id, { text, finish }) => [
+    event("session.step.started", { assistantMessageID: id }),
+    ...(text ? [event("session.text.ended", { assistantMessageID: id, ordinal: 0, text })] : []),
+    event("session.step.ended", { assistantMessageID: id, finish, files: [] })
+  ];
   return [
     event("session.execution.started", {}),
     event("session.inbox.delivered", { inboxID: "msg_prompt" }),
-    event("session.step.started", { assistantMessageID: "msg_a1" }),
-    event("session.text.ended", { assistantMessageID: "msg_a1", ordinal: 0, text: "PONG" }),
+    ...step("msg_a1", firstStep),
     event("session.inbox.delivered", { inboxID: "msg_reminder" }),
-    event("session.step.started", { assistantMessageID: "msg_a2" }),
-    event("session.text.ended", { assistantMessageID: "msg_a2", ordinal: 0, text: "What would you like to plan?" }),
+    ...step("msg_a2", secondStep),
     event("session.execution.succeeded", {})
   ];
 }
 
-test("a reminder delivered after our prompt does not replace the answer", () => {
-  for (const promptKnownFirst of [true, false]) {
-    const state = createV2TurnState("ses_1");
-    if (promptKnownFirst) {
-      setV2PromptID(state, "msg_prompt");
-    }
-    for (const event of lateReminderEvents()) {
-      applyV2Event(state, event);
-    }
-    if (!promptKnownFirst) {
-      setV2PromptID(state, "msg_prompt");
-    }
-    assert.equal(state.finalMessage, "PONG");
+function finalMessageFor(events, promptKnownFirst) {
+  const state = createV2TurnState("ses_1");
+  if (promptKnownFirst) {
+    setV2PromptID(state, "msg_prompt");
   }
+  for (const event of events) {
+    applyV2Event(state, event);
+  }
+  if (!promptKnownFirst) {
+    setV2PromptID(state, "msg_prompt");
+  }
+  return state.finalMessage;
+}
+
+test("a reminder answered after our complete reply does not replace the answer", () => {
+  const events = reminderEvents({ text: "PONG", finish: "stop" }, { text: "What would you like to plan?", finish: "stop" });
+  assert.equal(finalMessageFor(events, true), "PONG");
+  assert.equal(finalMessageFor(events, false), "PONG");
+});
+
+test("an answer that arrives after a mid-work reminder is still the answer", () => {
+  const events = reminderEvents({ finish: "tool-calls" }, { text: '{"verdict":"approve"}', finish: "stop" });
+  assert.equal(finalMessageFor(events, true), '{"verdict":"approve"}');
+  assert.equal(finalMessageFor(events, false), '{"verdict":"approve"}');
 });
 
 test("recovery stops at the next input after our prompt", async () => {
@@ -206,12 +238,28 @@ test("recovery stops at the next input after our prompt", async () => {
   await recoverV2Turn(
     recoveryClient([
       { id: "msg_idle", type: "idle", outcome: "succeeded" },
-      { id: "msg_a2", type: "assistant", content: [{ type: "text", text: "What would you like to plan?" }] },
+      { id: "msg_a2", type: "assistant", finish: "stop", content: [{ type: "text", text: "What would you like to plan?" }] },
       { id: "msg_reminder", type: "synthetic", text: "<system-reminder>Plan mode</system-reminder>" },
-      { id: "msg_a1", type: "assistant", content: [{ type: "text", text: "PONG" }] },
+      { id: "msg_a1", type: "assistant", finish: "stop", content: [{ type: "text", text: "PONG" }] },
       { id: "msg_prompt", type: "user", text: "Reply with PONG" }
     ]),
     state
   );
   assert.equal(state.finalMessage, "PONG");
+});
+
+test("recovery takes the answer that came after a mid-work reminder", async () => {
+  const state = createV2TurnState("ses_1");
+  state.promptID = "msg_prompt";
+  await recoverV2Turn(
+    recoveryClient([
+      { id: "msg_idle", type: "idle", outcome: "succeeded" },
+      { id: "msg_a2", type: "assistant", finish: "stop", content: [{ type: "text", text: '{"verdict":"approve"}' }] },
+      { id: "msg_reminder", type: "synthetic", text: "<system-reminder>Plan mode</system-reminder>" },
+      { id: "msg_a1", type: "assistant", finish: "tool-calls", content: [{ type: "reasoning", text: "Reading the diff." }] },
+      { id: "msg_prompt", type: "user", text: "Review this" }
+    ]),
+    state
+  );
+  assert.equal(state.finalMessage, '{"verdict":"approve"}');
 });

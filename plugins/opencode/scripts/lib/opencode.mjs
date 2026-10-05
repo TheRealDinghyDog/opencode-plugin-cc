@@ -1577,7 +1577,8 @@ async function runV2Turn(cwd, client, server, options) {
     stderr: "",
     fileChanges: [],
     touchedFiles: [...turnState.touchedFiles],
-    commandExecutions: turnState.commandExecutions
+    commandExecutions: turnState.commandExecutions,
+    question: turnState.question ?? null
   };
 }
 

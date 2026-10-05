@@ -26,9 +26,25 @@ export const HEADLESS_PERMISSION_MESSAGE =
   "This OpenCode Companion run is headless, so nobody can approve permission requests and they are rejected. Continue without it, or explain what you need.";
 
 // 2.x has no way to decline a question and continue: cancelling the form
-// interrupts the whole turn, so the turn ends with this error.
-export const HEADLESS_QUESTION_MESSAGE =
-  "OpenCode asked a question, which a headless run can't answer, so the turn stopped. Put the answer in the prompt and run it again, or continue the session in OpenCode.";
+// interrupts the whole turn. The question and its options are kept on the
+// result so Claude, which has the conversation, can answer it by resuming
+// the session.
+export const HEADLESS_QUESTION_MESSAGE = "OpenCode stopped to ask a question, which this run can't answer interactively.";
+
+function summarizeForm(form) {
+  return {
+    title: typeof form.title === "string" ? form.title : null,
+    fields: (Array.isArray(form.fields) ? form.fields : []).map((field) => ({
+      key: field?.key ?? null,
+      question: field?.description || field?.title || null,
+      options: (Array.isArray(field?.options) ? field.options : []).map((option) => ({
+        label: option?.label ?? String(option?.value ?? ""),
+        description: option?.description ?? null
+      })),
+      custom: Boolean(field?.custom)
+    }))
+  };
+}
 
 function shorten(text, limit = 96) {
   const normalized = String(text ?? "").replace(/\s+/g, " ").trim();
@@ -67,6 +83,7 @@ export function createV2TurnState(sessionID, options = {}) {
     steps: [],
     texts: new Map(),
     stepInputs: new Map(),
+    stepFinish: new Map(),
     currentInput: null,
     promptID: null,
     messageID: null,
@@ -77,6 +94,7 @@ export function createV2TurnState(sessionID, options = {}) {
     touchedFiles: new Set(),
     commandExecutions: [],
     questionAsked: false,
+    question: null,
     interruptReason: null,
     outcome: null,
     error: null,
@@ -95,21 +113,30 @@ function complete(state, outcome) {
   state.resolveCompletion?.(state);
 }
 
-// The answer is the last step that produced text: a tool-using turn first
-// says what it is about to do, and answers in a later step. Only steps that
-// answer our prompt count: the plan agent's "You are in Plan mode" reminder
-// is queued asynchronously, and when our prompt wins that race the reminder
-// is delivered later in the same execution and gets its own reply.
+// Picks the answer among the turn's steps. A step that ends with
+// `finish: "stop"` is a complete reply; one that ends with "tool-calls" only
+// narrated what it was about to do. The plan agent's "You are in Plan mode"
+// reminder is queued asynchronously and can be delivered mid-execution
+// (session.inbox.delivered), and both outcomes were seen live on 2.0.20:
+// - our prompt already had its complete reply, and the reminder got a reply
+//   of its own: the answer is our prompt's last "stop" step;
+// - our prompt's steps had no text yet, and the model answered in a step
+//   after the reminder: the answer is the last text step overall.
+// Until a step ends its finish is unknown, and steps that failed (interrupts,
+// dismissed questions) never get one; then our prompt's last text step, or
+// else the last text step overall, is the (partial) answer.
 function refreshFinalMessage(state) {
+  const hasText = (step) => Boolean(state.texts.get(step)?.trim());
+  const stopped = (step) => state.stepFinish.get(step) === "stop";
   const ours = state.promptID ? state.steps.filter((step) => state.stepInputs.get(step) === state.promptID) : [];
-  const steps = ours.length > 0 ? ours : state.steps;
-  for (let index = steps.length - 1; index >= 0; index -= 1) {
-    const text = state.texts.get(steps[index]);
-    if (text && text.trim()) {
-      state.finalMessage = text;
-      state.finalMessageID = steps[index];
-      return;
-    }
+  const pick =
+    ours.findLast((step) => hasText(step) && stopped(step)) ??
+    state.steps.findLast((step) => hasText(step) && stopped(step)) ??
+    ours.findLast(hasText) ??
+    state.steps.findLast(hasText);
+  if (pick) {
+    state.finalMessage = state.texts.get(pick);
+    state.finalMessageID = pick;
   }
 }
 
@@ -196,6 +223,10 @@ export function applyV2Event(state, event) {
       break;
     case "session.step.ended":
     case "session.step.failed":
+      if (!child && messageID && typeof data.finish === "string") {
+        state.stepFinish.set(messageID, data.finish);
+        refreshFinalMessage(state);
+      }
       for (const file of Array.isArray(data.files) ? data.files : []) {
         if (typeof file === "string" && file && !state.touchedFiles.has(file)) {
           state.touchedFiles.add(file);
@@ -220,6 +251,7 @@ export function applyV2Event(state, event) {
         .filter(Boolean)
         .join("; ");
       state.questionAsked = true;
+      state.question = summarizeForm(form);
       progress(
         state,
         `Dismissing OpenCode question ${form.id}${titles ? ` (${shorten(titles)})` : ""}: headless runs cannot answer interactive questions.`,
@@ -315,18 +347,27 @@ export async function recoverV2Turn(client, state, options = {}) {
     return false;
   }
   if (!state.finalMessage) {
-    // Walk forward in time from our prompt; a later input (a synthetic
-    // reminder, a queued user message) starts someone else's answer.
-    let answer = null;
+    // The same rule as refreshFinalMessage, on the stored items: walking
+    // forward from our prompt, the replies before the next input (a reminder,
+    // a queued message) are ours; prefer a complete ("stop") reply.
+    const ours = [];
+    const after = [];
+    let ownInput = true;
     for (let index = promptIndex - 1; index >= 0; index -= 1) {
       const item = items[index];
       if (item?.type === "user" || item?.type === "synthetic") {
-        break;
-      }
-      if (item?.type === "assistant" && assistantText(item).trim()) {
-        answer = item;
+        ownInput = false;
+      } else if (item?.type === "assistant" && assistantText(item).trim()) {
+        (ownInput ? ours : after).push(item);
       }
     }
+    const replies = [...ours, ...after];
+    const answer =
+      ours.findLast((item) => item.finish === "stop") ??
+      replies.findLast((item) => item.finish === "stop") ??
+      ours.at(-1) ??
+      replies.at(-1) ??
+      null;
     if (answer) {
       state.finalMessage = assistantText(answer);
       state.finalMessageID = answer.id ?? null;

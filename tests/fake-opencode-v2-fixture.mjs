@@ -8,7 +8,8 @@
 //   success (default)  one step that answers with text
 //   provider-error     session.execution.failed before any step
 //   permission         a write outside the workspace asks external_directory
-//   form               the question tool opens a form and waits for it
+//   form               the question tool opens a form and waits for it (on
+//                      the server's first prompt; later prompts answer)
 //   subagent           a child session runs and answers before the parent
 //   slow               streams text until interrupted (or 30s pass)
 //   late-reminder      answers, then a plan-mode reminder is delivered in
@@ -209,12 +210,12 @@ function startServer(args) {
     });
   }
 
-  function stepEnded(sessionID, assistantMessageID, files = []) {
+  function stepEnded(sessionID, assistantMessageID, files = [], finish = "stop") {
     emit("session.step.ended", {
       sessionID,
       assistantMessageID,
-      finish: "stop",
-      rawFinish: "stop",
+      finish,
+      rawFinish: finish === "stop" ? "stop" : "tool_calls",
       cost: 0,
       tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
       snapshot: "fake-snapshot",
@@ -248,7 +249,9 @@ function startServer(args) {
   async function runTurn(session, prompt, inboxID) {
     const sessionID = session.id;
     const agent = session.agent;
-    const scenario = process.env.FAKE_OPENCODE_V2_SCENARIO || "success";
+    const promptIndex = loadState().prompts.length - 1;
+    const configured = process.env.FAKE_OPENCODE_V2_SCENARIO || "success";
+    const scenario = configured === "form" && promptIndex > 0 ? "success" : configured;
     const reply = process.env.FAKE_OPENCODE_V2_REPLY_TEXT || DEFAULT_REPLY;
     const turn = { interrupted: false, waiters: new Map() };
     turns.set(sessionID, turn);
@@ -385,7 +388,7 @@ function startServer(args) {
         });
       }
 
-      stepEnded(sessionID, first);
+      stepEnded(sessionID, first, [], "tool-calls");
       recordAssistant(sessionID, first, "", agent);
       const second = id("msg");
       step(sessionID, agent, second);

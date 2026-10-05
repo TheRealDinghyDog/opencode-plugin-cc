@@ -6,7 +6,12 @@ allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" 
 
 Invoke the `opencode:opencode-rescue` subagent via the `Agent` tool (`subagent_type: "opencode:opencode-rescue"`), forwarding the raw user request as the prompt.
 `opencode:opencode-rescue` is a subagent, not a skill. Do not call `Skill(opencode:opencode-rescue)` or `Skill(opencode:rescue)`. The command runs inline so the `Agent` tool stays in scope; forked general-purpose subagents do not expose it.
-The final user-visible response must be OpenCode's output verbatim.
+The final user-visible response must be OpenCode's output verbatim, except when OpenCode stopped to ask a question (below).
+
+If OpenCode's output says it stopped to ask a question (OpenCode 2.x can't continue past one in a headless run):
+- When the conversation already makes the answer clear (the user stated it, or one option is plainly what they asked for), invoke `opencode:opencode-rescue` again with `--resume` and that answer as the prompt. Tell the user which answer you gave OpenCode and why.
+- Otherwise ask the user with `AskUserQuestion`, offering OpenCode's options, then invoke `opencode:opencode-rescue` again with `--resume` and their answer.
+- Never answer on the user's behalf when the answer changes scope or risk: deleting data, picking between incompatible designs, credentials, or anything they haven't indicated. Ask instead.
 
 Raw user request:
 $ARGUMENTS
