@@ -20,6 +20,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parseOpencodeVersionInfo } from "../plugins/opencode/scripts/lib/opencode-server.mjs";
+import { readProcessCommandLine } from "../plugins/opencode/scripts/lib/process.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const COMPANION = path.join(ROOT, "plugins", "opencode", "scripts", "opencode-companion.mjs");
@@ -576,6 +577,25 @@ function findServerRecords(dir) {
   return records;
 }
 
+// Which process actually listens on a server's port, and what it is. On
+// Windows the plugin's recorded PID can be the shell it spawned the server
+// through, so a teardown failure names both.
+function describeServerProcesses(url, recordedPid) {
+  const parts = [`recorded pid ${recordedPid ?? "none"}: ${readProcessCommandLine(recordedPid) ?? "(no such process)"}`];
+  let listener = null;
+  if (ON_WINDOWS) {
+    const port = Number(new URL(url).port);
+    const result = spawnSync(
+      "powershell.exe",
+      ["-NoProfile", "-Command", `(Get-NetTCPConnection -LocalPort ${port} -State Listen | Select-Object -First 1).OwningProcess`],
+      { encoding: "utf8", windowsHide: true }
+    );
+    listener = Number(String(result.stdout ?? "").trim()) || null;
+    parts.push(`listening pid ${listener ?? "unknown"}: ${readProcessCommandLine(listener) ?? "(unknown)"}`);
+  }
+  return { detail: parts.join("; "), listener };
+}
+
 async function respondsAt(url) {
   try {
     await fetch(`${url}/`, { signal: AbortSignal.timeout(1500) });
@@ -623,8 +643,10 @@ async function cleanUp({ server, workspace, pluginData, env, sessionId, record }
   }
   for (const entry of pluginServers) {
     if (entry?.url && (await respondsAt(entry.url))) {
-      survivors.push(`the plugin's server ${entry.url} (pid ${entry.pid})`);
+      const { detail, listener } = describeServerProcesses(entry.url, entry.pid);
+      survivors.push(`the plugin's server ${entry.url} (${detail})`);
       killTree(entry.pid);
+      killTree(listener);
     }
   }
   if (survivors.length > 0) {
