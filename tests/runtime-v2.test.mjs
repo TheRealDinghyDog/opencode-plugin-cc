@@ -250,3 +250,16 @@ test("a plan-mode reminder answered after our prompt does not become the answer"
     cleanup(ctx);
   }
 });
+
+test("a 2.x permission reply that finds the request gone does not fail the turn (#63)", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("permission-twice");
+  try {
+    const result = companion(ctx, ["task", "--write", "write outside the workspace"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Handled the requested task/);
+    assert.match(result.stderr, /was no longer pending \(HTTP 404\)/);
+    assert.equal(readFakeState(ctx.binDir).permissionReplies.length, 2);
+  } finally {
+    cleanup(ctx);
+  }
+});

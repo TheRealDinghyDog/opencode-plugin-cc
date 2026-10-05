@@ -8,6 +8,8 @@
 //   success (default)  one step that answers with text
 //   provider-error     session.execution.failed before any step
 //   permission         a write outside the workspace asks external_directory
+//   permission-twice   the same, plus a second ask in the step that is gone
+//                      by the time it is answered (404, like #63)
 //   form               the question tool opens a form and waits for it (on
 //                      the server's first prompt; later prompts answer)
 //   subagent           a child session runs and answers before the parent
@@ -281,9 +283,10 @@ function startServer(args) {
       }
     }
 
-    if (scenario === "permission" || scenario === "form" || scenario === "subagent") {
+    const permissionScenario = scenario === "permission" || scenario === "permission-twice";
+    if (permissionScenario || scenario === "form" || scenario === "subagent") {
       const callID = id("call");
-      const tool = { permission: "write", form: "question", subagent: "task" }[scenario];
+      const tool = permissionScenario ? "write" : { form: "question", subagent: "task" }[scenario];
       emit("session.tool.called", {
         sessionID,
         assistantMessageID: first,
@@ -292,7 +295,7 @@ function startServer(args) {
         executed: false
       });
 
-      if (scenario === "permission") {
+      if (permissionScenario) {
         const requestID = id("per");
         const request = {
           id: requestID,
@@ -304,6 +307,10 @@ function startServer(args) {
         };
         turn.pendingPermission = request;
         emit("permission.asked", request);
+        if (scenario === "permission-twice") {
+          // Nothing waits on this one, so a reply to it gets 404.
+          emit("permission.asked", { ...request, id: id("per"), resources: ["/outside/other/*"], save: ["/outside/other/*"] });
+        }
         const decision = await waitFor(turn, requestID);
         turn.pendingPermission = null;
         emit("permission.replied", { sessionID, requestID, reply: decision.decision });

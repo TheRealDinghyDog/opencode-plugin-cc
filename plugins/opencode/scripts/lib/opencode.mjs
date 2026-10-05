@@ -684,6 +684,15 @@ function describeQuestions(event) {
 // runs have nobody to answer, so reject immediately — the model receives the
 // rejection and must proceed autonomously — instead of stalling the turn
 // until the outer timeout (issue #28 / review M-02).
+// A reply to a request that is no longer pending: once one request of a step
+// is rejected, OpenCode drops the step's other requests and answers a reply
+// to them with 404 (issue #63). Nothing waits on such a request, so the turn
+// goes on; any other failure still fails it, since an undelivered reply
+// could leave the turn waiting.
+function replyNoLongerPending(error) {
+  return error instanceof OpencodeHttpError && (error.status === 404 || error.status === 409);
+}
+
 async function respondToQuestion(client, state, event) {
   const requestID = extractQuestionRequestId(event);
   if (!requestID) {
@@ -698,6 +707,10 @@ async function respondToQuestion(client, state, event) {
   try {
     await client.rejectQuestion(requestID);
   } catch (error) {
+    if (replyNoLongerPending(error)) {
+      emitProgress(state.onProgress, `OpenCode question ${requestID} was no longer pending (HTTP ${error.status}).`, "running");
+      return;
+    }
     state.error = error;
     emitProgress(state.onProgress, `OpenCode question rejection failed: ${error.message}`, "failed");
   }
@@ -736,6 +749,14 @@ async function respondToPermission(client, state, event, sessionID) {
   try {
     await client.respondPermission(sessionID, permissionID, "reject");
   } catch (error) {
+    if (replyNoLongerPending(error)) {
+      emitProgress(
+        state.onProgress,
+        `OpenCode permission request ${permissionID} was no longer pending (HTTP ${error.status}); nothing left to reject.`,
+        "running"
+      );
+      return;
+    }
     state.error = error;
     emitProgress(state.onProgress, `OpenCode permission response failed: ${error.message}`, "failed");
   }

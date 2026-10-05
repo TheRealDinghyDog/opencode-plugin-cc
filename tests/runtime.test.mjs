@@ -1662,3 +1662,28 @@ test("SessionStart exports this plugin's data directory under its own name, not 
   // must not overwrite theirs.
   assert.doesNotMatch(exported, /^export CLAUDE_PLUGIN_DATA=/m);
 });
+
+// Issue #63: once one permission request of a step is rejected, OpenCode
+// drops the others, and rejecting those too gets 404. That must not fail
+// the turn.
+test("a permission reply that finds the request gone does not fail the turn", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_SECOND_PERMISSION_GONE: "1" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--write", "check the fixture"], { cwd: repo, env });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Handled the requested task/);
+    assert.match(result.stderr, /was no longer pending \(HTTP 404\); nothing left to reject/);
+    const replies = readFakeState(binDir).permissions.map((entry) => entry.body.response);
+    assert.deepEqual(replies, ["reject", "reject"]);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
