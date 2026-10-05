@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   buildBasicAuthHeader,
+  fetchWithCause,
   OpencodeServerClient,
   parseOpencodeVersionInfo
 } from "../plugins/opencode/scripts/lib/opencode-server.mjs";
@@ -266,4 +267,28 @@ test("parseOpencodeVersionInfo reads both 1.x and 2.x --version output", () => {
   assert.deepEqual(parseOpencodeVersionInfo("1.18.34"), { version: "1.18.34", major: 1 });
   assert.deepEqual(parseOpencodeVersionInfo("opencode v2.0.20"), { version: "2.0.20", major: 2 });
   assert.equal(parseOpencodeVersionInfo("not a version"), null);
+});
+
+test("network failures name their cause instead of a bare \"fetch failed\"", async () => {
+  const failing = async () => {
+    throw new TypeError("fetch failed", { cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }) });
+  };
+  await assert.rejects(
+    fetchWithCause(failing, "http://opencode.test/session", {}, "POST /session"),
+    (error) => error.message === "OpenCode POST /session failed: fetch failed (ECONNRESET)" && error.code === "ECONNRESET"
+  );
+  // A port that was just free: nothing listens there.
+  const closedPort = await new Promise((resolve) => {
+    const probe = net.createServer().listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+  const client = new OpencodeServerClient(`http://127.0.0.1:${closedPort}`);
+  await assert.rejects(client.listSessions(), /OpenCode GET \/session failed: fetch failed \(ECONNREFUSED\)/);
+
+  const aborted = async () => {
+    throw Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+  };
+  await assert.rejects(fetchWithCause(aborted, "http://opencode.test", {}, "GET /"), { name: "AbortError" });
 });
