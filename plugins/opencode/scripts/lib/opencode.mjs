@@ -937,7 +937,14 @@ async function recoverFinalMessageFromServer(client, state, options = {}) {
         return false;
       }
     } else {
-      assistant = byID ?? turnMessages().pop() ?? null;
+      // Nothing captured yet. The turn's latest message is the candidate; one
+      // that OpenCode marks as having gone on to call tools is only interim
+      // narration ("I'll look into it..."), so keep polling (issue #93). A
+      // message without a finish keeps the old complete-on-text behaviour.
+      assistant = turnMessages().pop() ?? byID ?? null;
+      if ((assistant?.info?.finish ?? assistant?.finish) === "tool-calls") {
+        return false;
+      }
     }
     if (!assistant) {
       return false;
