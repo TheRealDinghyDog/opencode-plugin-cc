@@ -1720,6 +1720,34 @@ function parseStructuredReply(text, schema) {
   return problem ? { value: null, problem } : { value, problem: null };
 }
 
+// Asks for the schema's JSON in the reply text, with one repair turn in the
+// same session, which keeps the context. It is 2.x's only way (#54), and
+// 1.x's fallback when the model refuses OpenCode's forced structured-output
+// tool call (#90). `runTurn(text)` runs one turn and returns its state.
+async function structuredReplyTurns(runTurn, prompt, schema, onProgress) {
+  let turnState = await runTurn(buildV2StructuredPrompt(prompt, schema));
+  if (turnState.error) {
+    return { turnState, structured: null };
+  }
+  let parsed = parseStructuredReply(turnState.finalMessage, schema);
+  if (!parsed.value) {
+    emitProgress(onProgress, `OpenCode's reply was not the requested JSON (${parsed.problem}); asking once more.`, "finalizing");
+    const repair = await runTurn(buildV2RepairPrompt(parsed.problem));
+    if (!repair.error) {
+      parsed = parseStructuredReply(repair.finalMessage, schema);
+    }
+    turnState = { ...repair, touchedFiles: new Set([...turnState.touchedFiles, ...repair.touchedFiles]) };
+  }
+  return { turnState, structured: parsed.value };
+}
+
+// 1.x implements `format: json_schema` by forcing a StructuredOutput tool call,
+// and some models refuse forced tool calls: DeepSeek's thinking mode answers
+// "Thinking mode does not support this tool_choice" (issue #90).
+function refusedForcedToolCall(error) {
+  return /tool[_ ]?choice|structured[ _-]?output|response[_ ]?format|json[_ ]?schema/i.test(String(error?.message ?? ""));
+}
+
 async function runV2Turn(cwd, client, server, options) {
   const model = await resolveV2ModelRef(client, options.model, options.variant ?? options.effort ?? null);
   let sessionID = options.resumeThreadId ?? options.resumeSessionId ?? null;
@@ -1770,27 +1798,14 @@ async function runV2Turn(cwd, client, server, options) {
     streamDropPollIntervalMs: options.streamDropPollIntervalMs,
     recoveryTimeoutMs: options.recoveryTimeoutMs
   };
-  const prompt = options.outputSchema ? buildV2StructuredPrompt(options.prompt, options.outputSchema) : options.prompt;
+  const runTurn = (text) => captureV2Turn(client, sessionID, text, captureOptions);
   let turnState;
   let structured = null;
   try {
-    turnState = await captureV2Turn(client, sessionID, prompt, captureOptions);
-    if (options.outputSchema && !turnState.error) {
-      let parsed = parseStructuredReply(turnState.finalMessage, options.outputSchema);
-      if (!parsed.value) {
-        // One repair turn in the same session; the session keeps the context.
-        emitProgress(
-          options.onProgress,
-          `OpenCode's reply was not the requested JSON (${parsed.problem}); asking once more.`,
-          "finalizing"
-        );
-        const repair = await captureV2Turn(client, sessionID, buildV2RepairPrompt(parsed.problem), captureOptions);
-        if (!repair.error) {
-          parsed = parseStructuredReply(repair.finalMessage, options.outputSchema);
-        }
-        turnState = { ...repair, touchedFiles: new Set([...turnState.touchedFiles, ...repair.touchedFiles]) };
-      }
-      structured = parsed.value;
+    if (options.outputSchema) {
+      ({ turnState, structured } = await structuredReplyTurns(runTurn, options.prompt, options.outputSchema, options.onProgress));
+    } else {
+      turnState = await runTurn(options.prompt);
     }
   } catch (error) {
     if (createdSessionID) {
@@ -1881,18 +1896,17 @@ export async function runServerTurn(cwd, options = {}) {
       });
     }
 
-    let turnState;
-    try {
-      turnState = await captureTurn(
+    const runTurn = (text, { outputSchema = null, resumed = true } = {}) =>
+      captureTurn(
         client,
         sessionID,
         (signal) =>
           client.sendMessage(
             sessionID,
-            buildMessageParams(prompt, {
+            buildMessageParams(text, {
               model: options.model,
               variant: options.variant ?? options.effort ?? null,
-              outputSchema: options.outputSchema ?? null,
+              outputSchema,
               write,
               agent
             }),
@@ -1900,10 +1914,23 @@ export async function runServerTurn(cwd, options = {}) {
           ),
         {
           onProgress: options.onProgress,
-          resumed: resumedSession,
+          resumed,
           turnTimeoutMs: options.turnTimeoutMs
         }
       );
+    let turnState;
+    let structured = null;
+    try {
+      turnState = await runTurn(prompt, { outputSchema: options.outputSchema ?? null, resumed: resumedSession });
+      structured = turnState.structuredOutput ?? null;
+      if (options.outputSchema && structured === null && refusedForcedToolCall(turnState.error)) {
+        emitProgress(
+          options.onProgress,
+          `The model refused OpenCode's structured-output tool call (${turnState.error.message}); asking for the JSON in the reply instead.`,
+          "finalizing"
+        );
+        ({ turnState, structured } = await structuredReplyTurns(runTurn, prompt, options.outputSchema, options.onProgress));
+      }
     } catch (error) {
       if (createdSessionID) {
         try {
@@ -1915,7 +1942,6 @@ export async function runServerTurn(cwd, options = {}) {
       throw error;
     }
 
-    const structured = turnState.structuredOutput;
     const finalMessage =
       options.outputSchema && structured !== null && structured !== undefined
         ? typeof structured === "string"

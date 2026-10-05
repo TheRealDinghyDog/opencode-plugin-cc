@@ -1446,6 +1446,64 @@ test("adversarial-review prompt uses the adversarial-review.md template", { skip
   }
 });
 
+// Issue #90: a model that refuses OpenCode 1.x's forced structured-output
+// tool call (DeepSeek's thinking mode) still gets a review, from the JSON in
+// its reply.
+test("a 1.x review falls back to JSON in the reply when the model refuses the forced tool call", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "before\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "README.md"), "after\n");
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_REJECT_STRUCTURED: "1" });
+
+  try {
+    const result = run("node", [SCRIPT, "review", "--json"], { cwd: repo, env });
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.deepEqual(payload.result, { verdict: "approve", summary: "summary value", findings: [], next_steps: [] });
+
+    const messages = readFakeState(binDir).messages;
+    assert.equal(messages.length, 2);
+    assert.equal(messages[0].body.format.type, "json_schema");
+    assert.equal(messages[1].body.format, undefined);
+    assert.match(messages[1].prompt, /<output_schema>[\s\S]*"next_steps"[\s\S]*<\/output_schema>/);
+    assert.equal(messages[1].sessionID, messages[0].sessionID);
+
+    // Without --json, the progress says why the review asked again.
+    const rendered = run("node", [SCRIPT, "review"], { cwd: repo, env });
+    assert.match(`${rendered.stdout}${rendered.stderr}`, /refused OpenCode's structured-output tool call \(Thinking mode does not support this tool_choice/);
+    assert.match(rendered.stdout, /Verdict: approve|approve/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("a 1.x review failing for another reason gets no fallback", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "before\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "README.md"), "after\n");
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "provider-error" });
+
+  try {
+    const result = run("node", [SCRIPT, "review", "--json"], { cwd: repo, env });
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.result, null);
+    assert.match(payload.parseError ?? "", /fake-model is not supported/);
+    assert.equal(readFakeState(binDir).messages.length, 1);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
 test("review prompt uses the neutral review.md template", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
