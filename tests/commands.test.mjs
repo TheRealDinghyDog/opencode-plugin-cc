@@ -103,7 +103,8 @@ function commandFiles() {
 }
 
 function allowedTools(source) {
-  const frontmatter = source.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
+  // Windows checkouts may use CRLF line endings.
+  const frontmatter = source.replace(/\r\n/g, "\n").match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
   const line = frontmatter.split("\n").find((entry) => entry.startsWith("allowed-tools:"));
   if (!line) {
     return [];
@@ -127,7 +128,9 @@ function allowedTools(source) {
 
 test("commands pre-approve only the companion script and exact commands", () => {
   for (const file of commandFiles()) {
-    const bashRules = allowedTools(read(file)).filter((tool) => tool === "Bash" || tool.startsWith("Bash("));
+    const tools = allowedTools(read(file));
+    assert.ok(tools.length > 0, `${file} has no allowed-tools`);
+    const bashRules = tools.filter((tool) => tool === "Bash" || tool.startsWith("Bash("));
     for (const rule of bashRules) {
       const allowed = rule === COMPANION_RULE || (file === "commands/setup.md" && rule === `Bash(${NPM_INSTALL})`);
       assert.ok(allowed, `${file} pre-approves ${rule}`);
@@ -144,7 +147,7 @@ test("every node and npm invocation in a command matches its allowed-tools rule"
       assert.ok(invocation.startsWith(COMPANION_PREFIX), `${file}: ${invocation}`);
       assert.ok(tools.includes(COMPANION_RULE), `${file} runs the companion without ${COMPANION_RULE}`);
     }
-    for (const line of source.split("\n").filter((entry) => /^\s*npm /.test(entry))) {
+    for (const line of source.split(/\r?\n/).filter((entry) => /^\s*npm /.test(entry))) {
       assert.equal(line.trim(), NPM_INSTALL, file);
       assert.ok(tools.includes(`Bash(${NPM_INSTALL})`), `${file} runs npm without its exact rule`);
     }

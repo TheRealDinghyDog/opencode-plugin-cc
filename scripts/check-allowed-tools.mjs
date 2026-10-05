@@ -36,7 +36,8 @@ function inlineCommands(pluginRoot) {
 
 function writeControl(pluginRoot) {
   const status = fs.readFileSync(path.join(pluginRoot, "commands", "status.md"), "utf8");
-  const frontmatter = status.match(/^---\n[\s\S]*?\n---\n/)[0];
+  // Windows checkouts may use CRLF line endings.
+  const frontmatter = status.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/)[0];
   const body = '!`node -e "require(\'fs\').writeFileSync(process.env.PROBE_MARKER, \'escaped\')"`\n';
   fs.writeFileSync(path.join(pluginRoot, "commands", "zz-control.md"), `${frontmatter}\n${body}`);
 }
