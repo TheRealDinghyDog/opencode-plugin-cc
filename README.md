@@ -275,6 +275,8 @@ Then check in with:
 /opencode:result
 ```
 
+A background job has no time limit: it runs until OpenCode finishes, you cancel it with `/opencode:cancel`, or the Claude session ends. Long agentic tasks are normal, so the plugin never stops one on a timer or reports one as failed while it is still running.
+
 ## OpenCode Integration
 
 The OpenCode plugin wraps a local `opencode serve` process. It uses the global `opencode` binary installed in your environment and OpenCode's normal provider/configuration state.

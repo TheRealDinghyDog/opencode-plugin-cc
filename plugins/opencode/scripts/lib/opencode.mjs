@@ -15,7 +15,7 @@ import {
   unsupportedOpencodeVersionMessage
 } from "./opencode-server.mjs";
 import { OPENCODE_V2_MAJOR, OpencodeV2Client } from "./opencode-server-v2.mjs";
-import { captureV2Turn } from "./turn-capture-v2.mjs";
+import { captureV2Turn, recoveryWatch, resolveTurnTimeoutMs } from "./turn-capture-v2.mjs";
 import {
   SERVER_PASSWORD_ENV,
   SERVER_URL_ENV,
@@ -37,7 +37,6 @@ const READ_ONLY_AGENT = "plan";
 // last-resort ceiling so a dropped event stream can't hang the turn forever
 // (issue #2 / review finding #17). Deep reviews legitimately run many minutes,
 // so keep it generous; on expiry we still try to recover the final message.
-const DEFAULT_TURN_TIMEOUT_MS = 30 * 60 * 1000;
 // After the event stream drops, wait this long for the held-open /message
 // response and any trailing events to land before the first HTTP recovery
 // poll. This is a grace before polling STARTS — not a deadline (issue #30).
@@ -919,16 +918,26 @@ async function recoverFinalMessageFromServer(client, state, options = {}) {
       requestTimeoutMs: recoveryTimeoutMs
     });
     const messages = getMessagesArray(raw).filter(isAssistantMessage);
-    let assistant = state.messageID
-      ? messages.find((message) => extractMessageId(message) === state.messageID)
-      : null;
-    if (!assistant && (state.priorAssistantSnapshotSucceeded || !state.resumed)) {
-      assistant = messages
-        .filter((message) => {
-          const messageID = extractMessageId(message);
-          return messageID && !state.priorAssistantIds.has(messageID);
-        })
-        .pop();
+    const turnMessages = () =>
+      state.priorAssistantSnapshotSucceeded || !state.resumed
+        ? messages.filter((message) => {
+            const messageID = extractMessageId(message);
+            return messageID && !state.priorAssistantIds.has(messageID);
+          })
+        : [];
+    const byID = state.messageID ? messages.find((message) => extractMessageId(message) === state.messageID) : null;
+    let assistant;
+    if (options.requireFinished) {
+      // 1.18 stores one assistant message per step (oldest first): the turn is
+      // done only once its latest one finished with something other than
+      // tool calls (issue #87).
+      assistant = turnMessages().pop() ?? byID;
+      const finish = assistant?.info?.finish ?? assistant?.finish ?? null;
+      if (!finish || finish === "tool-calls") {
+        return false;
+      }
+    } else {
+      assistant = byID ?? turnMessages().pop() ?? null;
     }
     if (!assistant) {
       return false;
@@ -995,7 +1004,7 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
       rejectOpen(error);
     });
 
-  const turnTimeoutMs = Math.max(0, Number(options.turnTimeoutMs) || DEFAULT_TURN_TIMEOUT_MS);
+  const turnTimeoutMs = resolveTurnTimeoutMs(options);
   let timedOut = false;
   let turnTimer = null;
   // Hoisted so the finally block can drain it even if the try throws early.
@@ -1077,17 +1086,33 @@ async function captureTurn(client, sessionID, startRequest, options = {}) {
     // HTTP. So once the stream closes: wait a short grace for the response and
     // trailing events to land, then actively poll the server for the finished
     // message until the turn completes another way (response fallback,
-    // recovery, session.idle over a reconnect) or the OUTER turn timeout fires.
+    // recovery, session.idle over a reconnect), or recovery can no longer
+    // succeed (issue #87). There is no turn time limit any more.
     // We never fail the turn merely because the stream ended (issue #30).
+    const watch = recoveryWatch(options);
     streamDropRecovery = eventStream.then(async () => {
       if (streamDropGraceMs > 0 && !state.completed && !responseSettled) {
         await Promise.race([state.completion, responseSettledPromise, sleep(streamDropGraceMs)]);
       }
       while (!state.completed && !timedOut) {
-        // Only fetch when we actually lack a result; skip the redundant GET if
-        // parts already streamed in before the drop (issue #12).
-        if (!state.error && !state.finalMessage && state.structuredOutput == null) {
-          await recoverFinalMessageFromServer(client, state, { recoveryTimeoutMs: options.recoveryTimeoutMs });
+        // Fetch when we lack a result; skip the redundant GET if parts already
+        // streamed in before the drop (issue #12) while the held-open response
+        // can still complete the turn. Once that response is gone too (it fails
+        // on long turns), only the finished message on the server can (#87).
+        const lacking = !state.error && !state.finalMessage && state.structuredOutput == null;
+        if (lacking || responseSettled) {
+          state.recoveryError = null;
+          await recoverFinalMessageFromServer(client, state, {
+            recoveryTimeoutMs: options.recoveryTimeoutMs,
+            requireFinished: !lacking
+          });
+          const stop = state.completed ? null : watch(state.recoveryError, state.sessionID);
+          if (stop) {
+            state.error = stop;
+            emitProgress(state.onProgress, stop.message, "failed");
+            completeTurn(state);
+            break;
+          }
         }
         if (state.completed || timedOut) {
           break;

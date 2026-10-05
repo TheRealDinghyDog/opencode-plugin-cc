@@ -15,7 +15,47 @@
 // asks and question forms headlessly, recovers over HTTP when the stream
 // drops, and returns the same fields the 1.x capture does.
 
-const DEFAULT_TURN_TIMEOUT_MS = 30 * 60 * 1000;
+// Turns have no time limit (issue #87): long agentic turns are normal, and
+// giving up on a running turn reported it failed while it kept working. A turn
+// ends when OpenCode says so, on cancel, or with the Claude session.
+// `turnTimeoutMs` remains only for tests.
+export function resolveTurnTimeoutMs(options = {}) {
+  return Math.max(0, Number(options.turnTimeoutMs) || 0);
+}
+
+// While the event stream is gone, recovery polls the server. When that can no
+// longer succeed, stop waiting and say why (issue #87):
+// - no answer at all (no HTTP status): the server is gone, and with it the
+//   turn, which runs inside it;
+// - a 4xx other than 408/429 won't change (#92): the turn may still be
+//   running, but this run can't observe it any more;
+// - 5xx, 408 and 429 are transient: keep polling.
+export const DEFAULT_SERVER_GONE_MS = 120_000;
+
+export function recoveryWatch(options = {}) {
+  const windowMs = Number(options.serverGoneMs) > 0 ? Number(options.serverGoneMs) : DEFAULT_SERVER_GONE_MS;
+  let since = null;
+  return (error, sessionID) => {
+    const status = typeof error?.status === "number" ? error.status : null;
+    const hopeless = Boolean(error) && (status === null || (status >= 400 && status < 500 && status !== 408 && status !== 429));
+    if (!hopeless) {
+      since = null;
+      return null;
+    }
+    since ??= Date.now();
+    const elapsedMs = Date.now() - since;
+    if (elapsedMs < windowMs) {
+      return null;
+    }
+    const seconds = Math.round(elapsedMs / 1000);
+    return status === null
+      ? new Error(`Lost contact with the OpenCode server for ${seconds} s: ${error.message}`)
+      : new Error(
+          `Can no longer observe this turn: OpenCode has rejected recovery requests (HTTP ${status}) for ${seconds} s. ` +
+            `It may still be running; open it with \`opencode --session ${sessionID}\`.`
+        );
+  };
+}
 const DEFAULT_EVENT_OPEN_TIMEOUT_MS = 3000;
 const DEFAULT_STREAM_DROP_POLL_INTERVAL_MS = 2000;
 const DEFAULT_RECOVERY_TIMEOUT_MS = 5000;
@@ -474,17 +514,20 @@ export async function captureV2Turn(client, sessionID, prompt, options = {}) {
       }
     });
 
-  const turnTimeoutMs = Math.max(0, Number(options.turnTimeoutMs) || DEFAULT_TURN_TIMEOUT_MS);
+  const turnTimeoutMs = resolveTurnTimeoutMs(options);
   const pollIntervalMs = Math.max(50, Number(options.streamDropPollIntervalMs) || DEFAULT_STREAM_DROP_POLL_INTERVAL_MS);
   let timedOut = false;
   let turnTimer = null;
-  const timeout = new Promise((resolve) => {
-    turnTimer = setTimeout(() => {
-      timedOut = true;
-      resolve();
-    }, turnTimeoutMs);
-    turnTimer.unref?.();
-  });
+  const timeout =
+    turnTimeoutMs > 0
+      ? new Promise((resolve) => {
+          turnTimer = setTimeout(() => {
+            timedOut = true;
+            resolve();
+          }, turnTimeoutMs);
+          turnTimer.unref?.();
+        })
+      : new Promise(() => {});
 
   try {
     await Promise.race([
@@ -505,13 +548,22 @@ export async function captureV2Turn(client, sessionID, prompt, options = {}) {
 
     // A dropped stream is lost observation, not a finished turn (issue #30):
     // poll the message list until it shows how the turn ended.
+    const watch = recoveryWatch(options);
     const streamDropRecovery = eventStream.then(async () => {
       while (!state.completed && !timedOut) {
         for (const ask of await pendingAsksAfterDrop(client, state)) {
           await answerAsk(client, state, ask);
         }
+        state.recoveryError = null;
         await recoverV2Turn(client, state, options);
         if (state.completed || timedOut) {
+          break;
+        }
+        const stop = watch(state.recoveryError, sessionID);
+        if (stop) {
+          state.error = stop;
+          progress(state, stop.message, "failed");
+          complete(state, "failed");
           break;
         }
         await Promise.race([state.completion, timeout, sleep(pollIntervalMs)]);
