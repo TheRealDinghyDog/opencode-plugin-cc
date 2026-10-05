@@ -28,17 +28,27 @@ const CONTRACT_FILES = {
   1: path.join(ROOT, "tests", "opencode-event-contract.json"),
   2: path.join(ROOT, "tests", "opencode-v2-contract.json")
 };
+// `opencode` and `npm` are .cmd shims on Windows, which only a shell starts.
+const ON_WINDOWS = process.platform === "win32";
+const PLATFORM_NAMES = { linux: "Linux", darwin: "macOS", win32: "Windows" };
+
 const TURN_PROMPT = "Reply with exactly the word PONG and nothing else. Do not use any tools.";
 const TURN_TIMEOUT_MS = 3 * 60 * 1000;
 const SERVER_READY_TIMEOUT_MS = 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15 * 1000;
 
-export function failingIssueTitle(channel) {
-  return `OpenCode canary failing: ${channel}`;
+// "npm-latest on Windows": a channel runs on several OSes, and each run
+// needs its own issue.
+export function reportLabel(channel, platform = process.platform) {
+  return `${channel} on ${PLATFORM_NAMES[platform] ?? platform}`;
 }
 
-export function newMajorIssueTitle(major, channel) {
-  return `OpenCode canary: OpenCode ${major}.x detected (${channel})`;
+export function failingIssueTitle(label) {
+  return `OpenCode canary failing: ${label}`;
+}
+
+export function newMajorIssueTitle(major, label) {
+  return `OpenCode canary: OpenCode ${major}.x detected (${label})`;
 }
 
 // Rebuild the pinned shape of each event and object from a 1.x OpenAPI
@@ -160,7 +170,8 @@ export function rollupStatus(checks) {
 // newly seen major. Only titles this canary produces are ever touched.
 export function planIssueActions(report, openIssues) {
   const actions = [];
-  const failingTitle = failingIssueTitle(report.channel);
+  const label = report.label ?? report.channel;
+  const failingTitle = failingIssueTitle(label);
   const failing = openIssues.find((issue) => issue.title === failingTitle);
   const body = renderMarkdown(report);
   if (report.status === "fail") {
@@ -174,12 +185,12 @@ export function planIssueActions(report, openIssues) {
       action: "close",
       number: failing.number,
       title: failingTitle,
-      body: `The canary passes again on ${report.channel} (OpenCode ${report.opencodeVersion ?? "unknown"}).\n\n${body}`
+      body: `The canary passes again on ${label} (OpenCode ${report.opencodeVersion ?? "unknown"}).\n\n${body}`
     });
   }
 
   if (Number.isInteger(report.newMajor)) {
-    const title = newMajorIssueTitle(report.newMajor, report.channel);
+    const title = newMajorIssueTitle(report.newMajor, label);
     if (!openIssues.some((issue) => issue.title === title)) {
       actions.push({ action: "create", title, body });
     }
@@ -190,7 +201,7 @@ export function planIssueActions(report, openIssues) {
 export function renderMarkdown(report) {
   const icon = { pass: "✅", notice: "⚠️", fail: "❌" };
   const lines = [
-    `## OpenCode canary: ${report.channel} ${icon[report.status] ?? ""} ${report.status}`,
+    `## OpenCode canary: ${report.label ?? report.channel} ${icon[report.status] ?? ""} ${report.status}`,
     "",
     `OpenCode ${report.opencodeVersion ?? "(unknown version)"}, checked ${report.checkedAt}.`
   ];
@@ -314,7 +325,9 @@ async function startServer(cwd) {
   const child = spawn("opencode", ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd,
     env: childEnv({ OPENCODE_SERVER_PASSWORD: password }),
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: ON_WINDOWS,
+    windowsHide: true
   });
   let output = "";
   child.stdout.on("data", (chunk) => (output += chunk));
@@ -351,6 +364,11 @@ function stopServer(server) {
   if (!server?.child || server.child.exitCode !== null) {
     return;
   }
+  if (ON_WINDOWS) {
+    // The child is the shell; /T takes the server below it too.
+    spawnSync("taskkill", ["/pid", String(server.child.pid), "/T", "/F"], { windowsHide: true });
+    return;
+  }
   server.child.kill("SIGTERM");
   const timer = setTimeout(() => {
     if (server.child.exitCode === null) {
@@ -376,7 +394,7 @@ async function checkV1Server(server, contract, workspace, record) {
     contractCheck(record, "1.x routes", diffRoutes(contract.routes, doc.json));
   }
 
-  const directory = encodeURIComponent(fs.realpathSync(workspace));
+  const directory = encodeURIComponent(fs.realpathSync.native(workspace));
   const created = await request(server, "POST", `/session?directory=${directory}`, {});
   if (typeof created.json?.id === "string") {
     const removed = await request(server, "DELETE", `/session/${encodeURIComponent(created.json.id)}?directory=${directory}`);
@@ -405,7 +423,9 @@ async function checkV2Server(server, contract, workspace, record) {
     contractCheck(record, "2.x routes", diffRoutes(contract.routes, openapi.json));
   }
 
-  const created = await request(server, "POST", "/api/session", { location: { directory: fs.realpathSync(workspace) } });
+  const created = await request(server, "POST", "/api/session", {
+    location: { directory: fs.realpathSync.native(workspace) }
+  });
   const sessionID = created.json?.data?.id;
   if (typeof sessionID === "string") {
     const removed = await request(server, "DELETE", `/api/session/${encodeURIComponent(sessionID)}`);
@@ -424,7 +444,11 @@ async function checkV2Server(server, contract, workspace, record) {
 // the "homebrew" job test 1.18.20 while users were getting 2.0.20.
 const CHANNEL_LATEST = {
   "npm-latest": () => {
-    const result = spawnSync("npm", ["view", "opencode-ai", "version"], { encoding: "utf8", timeout: 60 * 1000 });
+    const result = spawnSync("npm", ["view", "opencode-ai", "version"], {
+      encoding: "utf8",
+      timeout: 60 * 1000,
+      shell: ON_WINDOWS
+    });
     return String(result.stdout ?? "").trim() || null;
   },
   homebrew: () => {
@@ -502,7 +526,8 @@ function checkTurn(workspace, env, record) {
     cwd: workspace,
     env,
     encoding: "utf8",
-    timeout: 60 * 1000
+    timeout: 60 * 1000,
+    shell: ON_WINDOWS
   });
   const model = String(models.stdout ?? "")
     .split(/\r?\n/)
@@ -546,7 +571,13 @@ export async function runCanary(options = {}) {
   let contract = null;
   let server = null;
   try {
-    const version = spawnSync("opencode", ["--version"], { cwd: workspace, env, encoding: "utf8", timeout: 30 * 1000 });
+    const version = spawnSync("opencode", ["--version"], {
+      cwd: workspace,
+      env,
+      encoding: "utf8",
+      timeout: 30 * 1000,
+      shell: ON_WINDOWS
+    });
     versionInfo = parseOpencodeVersionInfo(`${version.stdout ?? ""}${version.stderr ?? ""}`);
     if (!versionInfo) {
       record("opencode --version", "fail", version.error?.message ?? (`${version.stdout}${version.stderr}`.trim() || `exit ${version.status}`));
@@ -592,7 +623,8 @@ export async function runCanary(options = {}) {
       timeout: 30 * 1000
     });
     for (const dir of [workspace, pluginData]) {
-      fs.rmSync(dir, { recursive: true, force: true });
+      // Windows can hold files for a moment after the server exits.
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
     }
   }
   return finishReport({ channel, checks, versionInfo, contract });
@@ -605,6 +637,8 @@ function finishReport({ channel, checks, versionInfo, contract }) {
       : null;
   return {
     channel,
+    platform: process.platform,
+    label: reportLabel(channel),
     opencodeVersion: versionInfo?.version ?? null,
     major: versionInfo?.major ?? null,
     newMajor: versionInfo && !contract ? versionInfo.major : null,

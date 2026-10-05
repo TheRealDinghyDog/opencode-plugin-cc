@@ -9,6 +9,7 @@ import {
   failingIssueTitle,
   newMajorIssueTitle,
   planIssueActions,
+  reportLabel,
   rollupStatus
 } from "../scripts/opencode-canary.mjs";
 
@@ -158,4 +159,16 @@ test("planIssueActions opens a new-major issue once", () => {
     { action: "create", title }
   ]);
   assert.deepEqual(planIssueActions(newMajor, [{ number: 12, title }]), []);
+});
+
+test("each OS running a channel gets its own label and issue", () => {
+  assert.equal(reportLabel("npm-latest", "linux"), "npm-latest on Linux");
+  assert.equal(reportLabel("npm-latest", "win32"), "npm-latest on Windows");
+  assert.equal(reportLabel("homebrew", "darwin"), "homebrew on macOS");
+  const failing = report({ status: "fail", channel: "npm-latest", label: "npm-latest on Windows" });
+  const open = [{ number: 3, title: failingIssueTitle("npm-latest on Linux") }];
+  assert.deepEqual(
+    planIssueActions(failing, open).map(({ action, title }) => ({ action, title })),
+    [{ action: "create", title: "OpenCode canary failing: npm-latest on Windows" }]
+  );
 });
