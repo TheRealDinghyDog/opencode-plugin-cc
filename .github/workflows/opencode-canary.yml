@@ -63,9 +63,13 @@ jobs:
         if: matrix.channel == 'npm-latest'
         run: npm install -g opencode-ai@latest
 
+      # Runner images turn Homebrew auto-update off; without `brew update` the
+      # job tests whatever formula the image was built with, not what users get.
       - name: Install OpenCode (Homebrew)
         if: matrix.channel == 'homebrew'
-        run: brew install opencode
+        run: |
+          brew update
+          brew install opencode
 
       # No GitHub token in this step: it runs OpenCode.
       - name: Run canary
