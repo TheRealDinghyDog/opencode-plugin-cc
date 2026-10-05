@@ -32,9 +32,13 @@ concurrency:
 
 jobs:
   canary:
-    name: Canary (${{ matrix.channel }})
+    name: Canary (${{ matrix.channel }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    defaults:
+      run:
+        # The steps use bash syntax; Windows runners default to PowerShell.
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -42,6 +46,9 @@ jobs:
           # What the README and /opencode:setup tell people to install.
           - channel: npm-latest
             os: ubuntu-latest
+          # The PR workflow covers Windows only against the fake OpenCode.
+          - channel: npm-latest
+            os: windows-latest
           # The core Homebrew formula tracks every upstream tag; it shipped
           # OpenCode 2.x before any other channel.
           - channel: homebrew
