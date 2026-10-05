@@ -16,6 +16,9 @@
 //   slow               streams text until interrupted (or 30s pass)
 //   late-reminder      answers, then a plan-mode reminder is delivered in
 //                      the same execution and answered too (a real race)
+//
+// The reply text is FAKE_OPENCODE_V2_REPLY_TEXT, or the Nth entry of the
+// JSON array FAKE_OPENCODE_V2_REPLY_SEQUENCE for the server's Nth prompt.
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -254,7 +257,11 @@ function startServer(args) {
     const promptIndex = loadState().prompts.length - 1;
     const configured = process.env.FAKE_OPENCODE_V2_SCENARIO || "success";
     const scenario = configured === "form" && promptIndex > 0 ? "success" : configured;
-    const reply = process.env.FAKE_OPENCODE_V2_REPLY_TEXT || DEFAULT_REPLY;
+    const sequence = JSON.parse(process.env.FAKE_OPENCODE_V2_REPLY_SEQUENCE || "null");
+    const reply =
+      (Array.isArray(sequence) && sequence.length > 0 ? sequence[Math.min(promptIndex, sequence.length - 1)] : null) ||
+      process.env.FAKE_OPENCODE_V2_REPLY_TEXT ||
+      DEFAULT_REPLY;
     const turn = { interrupted: false, waiters: new Map() };
     turns.set(sessionID, turn);
 

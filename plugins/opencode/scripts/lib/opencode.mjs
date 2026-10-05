@@ -1526,6 +1526,88 @@ async function resolveV2ModelRef(client, model, effort) {
   return { providerID: target.providerID, id: match.id ?? target.modelID, ...(effort ? { variant: effort } : {}) };
 }
 
+// 2.x cannot constrain a reply to a JSON schema: the prompt route has no
+// `format`, and the generate routes return plain text. So the schema travels
+// in the prompt, and the JSON object is taken out of the reply (issue #54).
+function buildV2StructuredPrompt(prompt, schema) {
+  return `${prompt}\n\n<output_schema>\n${JSON.stringify(schema, null, 2)}\n</output_schema>\n\nReply with only one JSON object that matches output_schema: no prose before or after it, and no code fences.`;
+}
+
+function buildV2RepairPrompt(problem) {
+  return `Your previous reply was not a JSON object matching output_schema (${problem}). Reply again with only that JSON object: no prose, no code fences.`;
+}
+
+function balancedObjectEnd(text, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return -1;
+}
+
+// The whole reply, a ```json fence, or the first balanced {...} in it.
+export function extractJsonObject(text) {
+  const source = String(text ?? "").trim();
+  if (!source) {
+    return null;
+  }
+  const candidates = [source];
+  const fenced = /```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n?```/i.exec(source);
+  if (fenced) {
+    candidates.push(fenced[1]);
+  }
+  const start = source.indexOf("{");
+  if (start >= 0) {
+    const end = balancedObjectEnd(source, start);
+    if (end > start) {
+      candidates.push(source.slice(start, end + 1));
+    }
+  }
+  for (const candidate of candidates) {
+    try {
+      const value = JSON.parse(candidate);
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return value;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return null;
+}
+
+function parseStructuredReply(text, schema) {
+  const value = extractJsonObject(text);
+  if (!value) {
+    return { value: null, problem: "no JSON object found" };
+  }
+  const missing = (Array.isArray(schema?.required) ? schema.required : []).filter((key) => !(key in value));
+  if (missing.length > 0) {
+    return { value: null, problem: `missing ${missing.map((key) => `"${key}"`).join(", ")}` };
+  }
+  return { value, problem: null };
+}
+
 async function runV2Turn(cwd, client, server, options) {
   const model = await resolveV2ModelRef(client, options.model, options.variant ?? options.effort ?? null);
   let sessionID = options.resumeThreadId ?? options.resumeSessionId ?? null;
@@ -1562,15 +1644,35 @@ async function runV2Turn(cwd, client, server, options) {
     });
   }
 
+  const captureOptions = {
+    onProgress: options.onProgress,
+    turnTimeoutMs: options.turnTimeoutMs,
+    eventOpenTimeoutMs: options.eventOpenTimeoutMs,
+    streamDropPollIntervalMs: options.streamDropPollIntervalMs,
+    recoveryTimeoutMs: options.recoveryTimeoutMs
+  };
+  const prompt = options.outputSchema ? buildV2StructuredPrompt(options.prompt, options.outputSchema) : options.prompt;
   let turnState;
+  let structured = null;
   try {
-    turnState = await captureV2Turn(client, sessionID, options.prompt, {
-      onProgress: options.onProgress,
-      turnTimeoutMs: options.turnTimeoutMs,
-      eventOpenTimeoutMs: options.eventOpenTimeoutMs,
-      streamDropPollIntervalMs: options.streamDropPollIntervalMs,
-      recoveryTimeoutMs: options.recoveryTimeoutMs
-    });
+    turnState = await captureV2Turn(client, sessionID, prompt, captureOptions);
+    if (options.outputSchema && !turnState.error) {
+      let parsed = parseStructuredReply(turnState.finalMessage, options.outputSchema);
+      if (!parsed.value) {
+        // One repair turn in the same session; the session keeps the context.
+        emitProgress(
+          options.onProgress,
+          `OpenCode's reply was not the requested JSON (${parsed.problem}); asking once more.`,
+          "finalizing"
+        );
+        const repair = await captureV2Turn(client, sessionID, buildV2RepairPrompt(parsed.problem), captureOptions);
+        if (!repair.error) {
+          parsed = parseStructuredReply(repair.finalMessage, options.outputSchema);
+        }
+        turnState = { ...repair, touchedFiles: new Set([...turnState.touchedFiles, ...repair.touchedFiles]) };
+      }
+      structured = parsed.value;
+    }
   } catch (error) {
     if (createdSessionID) {
       try {
@@ -1587,8 +1689,8 @@ async function runV2Turn(cwd, client, server, options) {
     threadId: sessionID,
     turnId: turnState.messageID,
     serverUrl: server.url,
-    finalMessage: turnState.finalMessage,
-    structuredOutput: null,
+    finalMessage: structured ? JSON.stringify(structured) : turnState.finalMessage,
+    structuredOutput: structured,
     reasoningSummary: turnState.reasoningSummary,
     turn: {
       id: turnState.messageID ?? "opencode-message",

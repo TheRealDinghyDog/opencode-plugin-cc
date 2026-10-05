@@ -5,6 +5,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { extractJsonObject } from "../plugins/opencode/scripts/lib/opencode.mjs";
+import { saveState } from "../plugins/opencode/scripts/lib/state.mjs";
 import { HEADLESS_PERMISSION_MESSAGE } from "../plugins/opencode/scripts/lib/turn-capture-v2.mjs";
 import { readFakeState } from "./fake-opencode-fixture.mjs";
 import { installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
@@ -17,6 +19,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN_ROOT = path.join(ROOT, "plugins", "opencode");
 const SCRIPT = path.join(PLUGIN_ROOT, "scripts", "opencode-companion.mjs");
 const SESSION_HOOK = path.join(PLUGIN_ROOT, "scripts", "session-lifecycle-hook.mjs");
+const STOP_HOOK = path.join(PLUGIN_ROOT, "scripts", "stop-review-gate-hook.mjs");
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {
@@ -250,6 +253,129 @@ test("a plan-mode reminder answered after our prompt does not become the answer"
     cleanup(ctx);
   }
 });
+
+const REVIEW = {
+  verdict: "needs-attention",
+  summary: "README changed without a test.",
+  findings: [
+    {
+      severity: "low",
+      title: "Untested change",
+      body: "The README edit has no accompanying check.",
+      file: "README.md",
+      line_start: 1,
+      line_end: 1,
+      confidence: 0.6,
+      recommendation: "Add a check."
+    }
+  ],
+  next_steps: ["Add a check."]
+};
+
+function changeReadme(ctx) {
+  fs.writeFileSync(path.join(ctx.repo, "README.md"), "changed\n");
+}
+
+test("extractJsonObject takes a bare object, a fenced block, or the first balanced object", () => {
+  assert.deepEqual(extractJsonObject('{"a":1}'), { a: 1 });
+  assert.deepEqual(extractJsonObject('Review:\n```json\n{"b":"}{"}\n```\nDone.'), { b: "}{" });
+  assert.deepEqual(extractJsonObject('Sure: {"c":{"d":"x\\"}"}} trailing'), { c: { d: 'x"}' } });
+  assert.equal(extractJsonObject("[1, 2]"), null);
+  assert.equal(extractJsonObject("no json here"), null);
+});
+
+test("a 2.x review sends the schema in the prompt and reads JSON out of the reply", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", {
+    FAKE_OPENCODE_V2_REPLY_SEQUENCE: JSON.stringify([`Here is the review:\n\`\`\`json\n${JSON.stringify(REVIEW)}\n\`\`\``])
+  });
+  try {
+    changeReadme(ctx);
+    const result = companion(ctx, ["review", "--json"]);
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.deepEqual(payload.result, REVIEW);
+    const prompts = readFakeState(ctx.binDir).prompts;
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0].body.text, /<output_schema>[\s\S]*"next_steps"[\s\S]*<\/output_schema>/);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("a 2.x review that answers in prose gets one repair turn in the same session", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", {
+    FAKE_OPENCODE_V2_REPLY_SEQUENCE: JSON.stringify(["The change looks fine to me.", JSON.stringify(REVIEW)])
+  });
+  try {
+    changeReadme(ctx);
+    const result = companion(ctx, ["review"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Verdict: needs-attention/);
+    assert.match(result.stdout, /Untested change/);
+    assert.match(result.stderr, /not the requested JSON \(no JSON object found\); asking once more/);
+    const state = readFakeState(ctx.binDir);
+    assert.equal(state.sessions.length, 1);
+    assert.equal(state.prompts.length, 2);
+    assert.equal(state.prompts[1].sessionID, state.prompts[0].sessionID);
+    assert.match(state.prompts[1].body.text, /^Your previous reply was not a JSON object matching output_schema/);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("a 2.x review that never returns valid JSON shows the last reply", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", {
+    FAKE_OPENCODE_V2_REPLY_SEQUENCE: JSON.stringify(["prose one", '{"verdict":"approve"}'])
+  });
+  try {
+    changeReadme(ctx);
+    const result = companion(ctx, ["review"]);
+    assert.match(result.stdout, /OpenCode did not return valid structured JSON|unexpected review shape/);
+    assert.match(result.stdout, /"verdict":"approve"/);
+    assert.equal(readFakeState(ctx.binDir).prompts.length, 2);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+for (const [reply, decision] of [
+  ["ALLOW: the last turn only edited docs.", undefined],
+  ["BLOCK: the last turn removed a test.", "block"]
+]) {
+  test(`the stop-review gate reads a 2.x ${decision ?? "allow"} answer`, { skip: LOCAL_LISTEN_SKIP }, () => {
+    const ctx = setup("success", { FAKE_OPENCODE_V2_REPLY_TEXT: reply });
+    const previous = process.env.CLAUDE_PLUGIN_DATA;
+    process.env.CLAUDE_PLUGIN_DATA = ctx.env.CLAUDE_PLUGIN_DATA;
+    try {
+      saveState(ctx.repo, { version: 1, config: { stopReviewGate: true }, jobs: [] });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CLAUDE_PLUGIN_DATA;
+      } else {
+        process.env.CLAUDE_PLUGIN_DATA = previous;
+      }
+    }
+    try {
+      const result = run("node", [STOP_HOOK], {
+        cwd: ctx.repo,
+        env: ctx.env,
+        input: JSON.stringify({
+          cwd: ctx.repo,
+          session_id: ctx.env.OPENCODE_COMPANION_SESSION_ID,
+          last_assistant_message: "Previous turn output."
+        })
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const output = result.stdout.trim() ? JSON.parse(result.stdout) : {};
+      assert.equal(output.decision, decision);
+      if (decision === "block") {
+        assert.match(output.reason, /removed a test/);
+      }
+    } finally {
+      cleanup(ctx);
+    }
+  });
+}
 
 test("a 2.x permission reply that finds the request gone does not fail the turn (#63)", { skip: LOCAL_LISTEN_SKIP }, () => {
   const ctx = setup("permission-twice");
