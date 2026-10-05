@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import test, { mock } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
@@ -49,50 +49,45 @@ test("turns have no time limit unless a test sets one", () => {
   assert.equal(resolveTurnTimeoutMs({ turnTimeoutMs: 700 }), 700);
 });
 
-test("a 2.x turn keeps waiting past half an hour and finishes normally", async () => {
+// Without mocked timers (node:test's mock.timers needs Node 20.4; the plugin
+// supports 18.18): watch every timer the capture arms while a turn runs to
+// its end. The old limit armed one for 30 minutes.
+test("a 2.x turn arms no turn-length timer and finishes normally", async () => {
   const recording = JSON.parse(fs.readFileSync(path.join(RECORDINGS, "success.json"), "utf8"));
   const prompt = recording.events.find(
     (event) => event.type === "session.inbox.enqueued" && event.data.sessionID === recording.sid && event.data.item.type === "user"
   );
   let deliver;
-  let endStream;
   const client = {
     subscribeEvents: (onEvent, { onOpen, signal }) => {
       deliver = onEvent;
       onOpen();
-      return new Promise((resolve) => {
-        endStream = resolve;
-        signal.addEventListener("abort", resolve);
-      });
+      return new Promise((resolve) => signal.addEventListener("abort", resolve));
     },
-    prompt: async () => ({ id: prompt.data.inboxID }),
+    prompt: async () => {
+      setImmediate(() => recording.events.forEach((event) => deliver(event)));
+      return { id: prompt.data.inboxID };
+    },
     listPermissions: async () => [],
     listForms: async () => []
   };
 
-  mock.timers.enable({ apis: ["setTimeout"] });
+  const delays = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback, ms, ...args) => {
+    delays.push(Number(ms) || 0);
+    return originalSetTimeout(callback, ms, ...args);
+  };
+  let state;
   try {
-    let settled = false;
-    const turn = captureV2Turn(client, recording.sid, "go").then((state) => {
-      settled = true;
-      return state;
-    });
-    await new Promise((resolve) => setImmediate(resolve));
-    mock.timers.tick(31 * 60 * 1000);
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(settled, false, "the turn must still be waiting after 31 minutes");
-
-    for (const event of recording.events) {
-      deliver(event);
-    }
-    const state = await turn;
-    endStream?.();
-    assert.equal(state.outcome, "succeeded");
-    assert.equal(state.error, null);
-    assert.ok(state.finalMessage);
+    state = await captureV2Turn(client, recording.sid, "go");
   } finally {
-    mock.timers.reset();
+    globalThis.setTimeout = originalSetTimeout;
   }
+  assert.equal(state.outcome, "succeeded");
+  assert.equal(state.error, null);
+  assert.ok(state.finalMessage);
+  assert.ok(Math.max(0, ...delays) < 5 * 60 * 1000, `a timer of ${Math.max(...delays)} ms was armed`);
 });
 
 test("a 2.x turn stops waiting once the server is gone, and says so", async () => {
