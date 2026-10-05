@@ -232,10 +232,21 @@ function freePort() {
   });
 }
 
-// OpenCode and the plugin never see GitHub credentials.
+// OpenCode and the plugin never see GitHub credentials. Nor do they inherit
+// a surrounding Claude session's companion state (data dir, session id,
+// transcript) when the canary runs inside one; the run sets its own.
 function childEnv(extra = {}) {
   const env = { ...process.env, ...extra };
-  for (const key of ["GH_TOKEN", "GITHUB_TOKEN", "OPENCODE_COMPANION_SERVER_URL", "OPENCODE_SERVER_PASSWORD"]) {
+  for (const key of [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "OPENCODE_COMPANION_SERVER_URL",
+    "OPENCODE_SERVER_PASSWORD",
+    "OPENCODE_COMPANION_PLUGIN_DATA",
+    "OPENCODE_COMPANION_SESSION_ID",
+    "OPENCODE_COMPANION_TRANSCRIPT_PATH",
+    "CLAUDE_PLUGIN_DATA"
+  ]) {
     if (!(key in extra)) {
       delete env[key];
     }
@@ -523,7 +534,12 @@ export async function runCanary(options = {}) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-canary-"));
   const pluginData = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-canary-data-"));
   const sessionId = `canary-${crypto.randomBytes(6).toString("hex")}`;
-  const env = childEnv({ CLAUDE_PLUGIN_DATA: pluginData, OPENCODE_COMPANION_SESSION_ID: sessionId });
+  // OPENCODE_COMPANION_PLUGIN_DATA wins over CLAUDE_PLUGIN_DATA (issue #61).
+  const env = childEnv({
+    OPENCODE_COMPANION_PLUGIN_DATA: pluginData,
+    CLAUDE_PLUGIN_DATA: pluginData,
+    OPENCODE_COMPANION_SESSION_ID: sessionId
+  });
   spawnSync("git", ["init", "-q"], { cwd: workspace });
 
   let versionInfo = null;
