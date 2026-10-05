@@ -182,6 +182,7 @@ function importSession(args) {
 }
 
 function startServer(args) {
+  const startedAt = Date.now();
   const hostname = args[args.indexOf("--hostname") + 1] || "127.0.0.1";
   const port = Number(args[args.indexOf("--port") + 1] || 0);
   updateState((state) => {
@@ -553,7 +554,11 @@ function startServer(args) {
       /^\/api\/model$/,
       (req, res) =>
         sendJson(res, {
-          data: [{ ...MODEL, modelID: MODEL.id, variants: [{ id: "none" }, { id: "low" }, { id: "high" }] }]
+          // Like a real 2.x server just after it starts, list nothing for a while (#82).
+          data:
+            Date.now() - startedAt < Number(process.env.FAKE_OPENCODE_V2_MODELS_SETTLE_MS || 0)
+              ? []
+              : [{ ...MODEL, modelID: MODEL.id, variants: [{ id: "none" }, { id: "low" }, { id: "high" }] }]
         })
     ],
     ["GET", /^\/api\/model\/default$/, (req, res) => sendJson(res, { data: { ...MODEL, modelID: MODEL.id } })],

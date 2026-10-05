@@ -189,6 +189,30 @@ test("--model and --effort become a validated 2.x model reference", { skip: LOCA
   }
 });
 
+// Issue #82: a just-started 2.x server lists no models for a few seconds.
+test("--model works on a 2.x server whose model list is still loading", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", { FAKE_OPENCODE_V2_MODELS_SETTLE_MS: "2500" });
+  try {
+    const result = companion(ctx, ["task", "--model", "fake/fake-model", "go"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(readFakeState(ctx.binDir).sessions[0].body.model, { providerID: "fake", id: "fake-model" });
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("--effort without --model asks for the model on 2.x instead of guessing one", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup();
+  try {
+    const result = companion(ctx, ["task", "--effort", "high", "go"]);
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /On OpenCode 2\.x, --effort needs --model provider\/model as well/);
+    assert.equal(readFakeState(ctx.binDir).prompts.length, 0);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
 test("--resume-last continues the workspace's latest 2.x task session", { skip: LOCAL_LISTEN_SKIP }, () => {
   const ctx = setup();
   try {

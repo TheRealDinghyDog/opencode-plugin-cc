@@ -1531,23 +1531,40 @@ export async function interruptServerTurn(cwd, { threadId, serverUrl = null, ser
 // Variants are defined per model, so --effort is checked against that
 // model's own list instead of being sent blindly (an unknown variant fails
 // the turn with provider.no-route).
+// Right after `opencode serve` starts, 2.x lists no models, then a partial
+// set, for a few seconds; its default-model route meanwhile names OpenCode's
+// free fallback (issue #82). So a requested model gets that long to appear.
+const V2_MODEL_WAIT_MS = 10_000;
+const V2_MODEL_POLL_MS = 500;
+
+async function findV2Model(client, target) {
+  const deadline = Date.now() + V2_MODEL_WAIT_MS;
+  for (;;) {
+    const models = await client.listModels();
+    const match = models.find(
+      (candidate) =>
+        candidate?.providerID === target.providerID &&
+        (candidate.id === target.modelID || candidate.modelID === target.modelID)
+    );
+    if (match || Date.now() >= deadline) {
+      return match ?? null;
+    }
+    await sleep(V2_MODEL_POLL_MS);
+  }
+}
+
 async function resolveV2ModelRef(client, model, effort) {
-  let target = normalizeModelSelection(model);
+  const target = normalizeModelSelection(model);
   if (!target && !effort) {
+    // No model sent: OpenCode picks the configured one when the turn runs.
     return null;
   }
   if (!target) {
-    const fallback = await client.defaultModel();
-    if (!fallback?.providerID) {
-      throw new Error("OpenCode 2.x needs a model for --effort; pass --model provider/model as well.");
-    }
-    target = { providerID: fallback.providerID, modelID: fallback.id ?? fallback.modelID };
+    // 2.x puts the effort on the model reference, so it needs the model, and
+    // the default-model route can't be trusted to name it (#82).
+    throw new Error("On OpenCode 2.x, --effort needs --model provider/model as well.");
   }
-  const models = await client.listModels();
-  const match = models.find(
-    (candidate) =>
-      candidate?.providerID === target.providerID && (candidate.id === target.modelID || candidate.modelID === target.modelID)
-  );
+  const match = await findV2Model(client, target);
   if (!match) {
     throw new Error(
       `OpenCode has no model ${target.providerID}/${target.modelID}. Run \`opencode models\` to list the available ones.`
