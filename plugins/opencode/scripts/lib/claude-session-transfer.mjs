@@ -210,19 +210,15 @@ function buildAssistantMessage(text, time, sessionID, messageID, partID, parentI
   };
 }
 
-export function buildOpenCodeImportDocumentFromClaudeJsonl(jsonl, options = {}) {
-  const cwd = options.cwd ?? process.cwd();
-  const version = options.version ?? "unknown";
-  const idFactory = options.idFactory ?? randomId;
-  const sessionID = options.sessionID ?? idFactory("ses");
+// The Claude turns both import formats carry, in order: user and assistant
+// text only, with strictly increasing timestamps.
+function collectClaudeTurns(jsonl, options = {}) {
   const timeState = {
     fallbackTime: Number.isFinite(options.fallbackTime) ? Math.trunc(options.fallbackTime) : Date.now(),
     fallbackOffset: 0,
     lastTime: -Infinity
   };
-  const messages = [];
-  let firstUserText = "";
-  let lastMessageID = null;
+  const turns = [];
 
   for (const entry of parseClaudeJsonl(jsonl)) {
     // Skip sidechain/subagent turns — Claude Code interleaves them into the same
@@ -245,30 +241,45 @@ export function buildOpenCodeImportDocumentFromClaudeJsonl(jsonl, options = {}) 
     // turns that precede the first user message (a null parentID fails the whole
     // import). Real Claude transcripts open with a user turn, so this only skips
     // orphaned leading assistant content.
-    if (role === "assistant" && !lastMessageID) {
+    if (role === "assistant" && turns.length === 0) {
       continue;
     }
 
-    const time = nextTimestamp(entry, timeState);
-    const messageID = idFactory("msg");
-    const partID = idFactory("prt");
-    if (role === "user") {
-      if (!firstUserText) {
-        firstUserText = text;
-      }
-      messages.push(buildUserMessage(text, time, sessionID, messageID, partID));
-      lastMessageID = messageID;
-    } else {
-      messages.push(buildAssistantMessage(text, time, sessionID, messageID, partID, lastMessageID, cwd));
-      lastMessageID = messageID;
-    }
+    turns.push({ role, text, time: nextTimestamp(entry, timeState) });
   }
 
-  if (messages.length === 0) {
+  if (turns.length === 0) {
     throw new Error("Claude transcript did not contain any importable user or assistant text messages.");
   }
+  return turns;
+}
 
-  const title = shorten(firstUserText || messages[0].parts[0].text, 80) || "Claude session";
+function importTitle(turns) {
+  const firstUser = turns.find((turn) => turn.role === "user");
+  return shorten(firstUser?.text ?? turns[0].text, 80) || "Claude session";
+}
+
+export function buildOpenCodeImportDocumentFromClaudeJsonl(jsonl, options = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const version = options.version ?? "unknown";
+  const idFactory = options.idFactory ?? randomId;
+  const sessionID = options.sessionID ?? idFactory("ses");
+  const turns = collectClaudeTurns(jsonl, options);
+  const messages = [];
+  let lastMessageID = null;
+
+  for (const turn of turns) {
+    const messageID = idFactory("msg");
+    const partID = idFactory("prt");
+    if (turn.role === "user") {
+      messages.push(buildUserMessage(turn.text, turn.time, sessionID, messageID, partID));
+    } else {
+      messages.push(buildAssistantMessage(turn.text, turn.time, sessionID, messageID, partID, lastMessageID, cwd));
+    }
+    lastMessageID = messageID;
+  }
+
+  const title = importTitle(turns);
   return {
     info: {
       id: sessionID,
@@ -296,6 +307,47 @@ export function buildOpenCodeImportDocumentFromClaudeJsonl(jsonl, options = {}) 
         created: messages[0].info.time.created,
         updated: messages[messages.length - 1].info.time.created
       }
+    },
+    messages
+  };
+}
+
+const IMPORT_MODEL_REF = { id: OPENCODE_IMPORT_MODEL_ID, providerID: OPENCODE_IMPORT_PROVIDER_ID };
+
+// OpenCode 2.x `session import` document (issue #55). Messages are typed
+// items, and every schema rejects unknown keys, so only schema keys go in.
+// 2.x keeps the document's session id, so it must be new; the project is
+// resolved from the import's working directory, whatever projectID says.
+export function buildOpenCodeV2ImportDocumentFromClaudeJsonl(jsonl, options = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const idFactory = options.idFactory ?? randomId;
+  const sessionID = options.sessionID ?? idFactory("ses");
+  const turns = collectClaudeTurns(jsonl, options);
+  const messages = turns.map((turn) =>
+    turn.role === "user"
+      ? { id: idFactory("msg"), type: "user", time: { created: turn.time }, text: turn.text }
+      : {
+          id: idFactory("msg"),
+          type: "assistant",
+          time: { created: turn.time, completed: turn.time },
+          agent: OPENCODE_IMPORT_AGENT,
+          model: { ...IMPORT_MODEL_REF },
+          content: [{ type: "text", text: turn.text }],
+          finish: "stop"
+        }
+  );
+
+  return {
+    info: {
+      id: sessionID,
+      projectID: "global",
+      title: importTitle(turns),
+      agent: OPENCODE_IMPORT_AGENT,
+      model: { ...IMPORT_MODEL_REF },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: turns[0].time, updated: turns[turns.length - 1].time },
+      location: { directory: cwd }
     },
     messages
   };

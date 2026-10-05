@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { buildOpenCodeImportDocumentFromClaudeJsonl } from "./claude-session-transfer.mjs";
+import {
+  buildOpenCodeImportDocumentFromClaudeJsonl,
+  buildOpenCodeV2ImportDocumentFromClaudeJsonl
+} from "./claude-session-transfer.mjs";
 import { createTempDir, readJsonFile, writeJsonFile } from "./fs.mjs";
 import {
   OpencodeHttpError,
@@ -1890,8 +1893,15 @@ export async function importExternalAgentSession(cwd, options = {}) {
   }
   const version = parseOpenCodeVersion(versionOutput);
   const transcript = fs.readFileSync(options.sourcePath, "utf8");
-  const document = buildOpenCodeImportDocumentFromClaudeJsonl(transcript, {
-    cwd,
+  // 2.x moved import under `session` and takes typed message items (#55).
+  // --standalone imports through a private server: without it the 2.x CLI
+  // starts OpenCode's background service. The import resolves the project
+  // from its working directory.
+  const v2 = versionInfo?.major === 2;
+  const importCwd = v2 ? canonicalWorkspaceDirectory(cwd) : cwd;
+  const buildDocument = v2 ? buildOpenCodeV2ImportDocumentFromClaudeJsonl : buildOpenCodeImportDocumentFromClaudeJsonl;
+  const document = buildDocument(transcript, {
+    cwd: importCwd,
     version,
     idFactory: options.idFactory,
     fallbackTime: options.fallbackTime
@@ -1901,8 +1911,9 @@ export async function importExternalAgentSession(cwd, options = {}) {
   const importPath = path.join(tempDir, "claude-session-import.json");
   try {
     writeJsonFile(importPath, document);
-    const importResult = runCommandChecked("opencode", ["import", importPath], {
-      cwd,
+    const importArgs = v2 ? ["session", "import", "--standalone", importPath] : ["import", importPath];
+    const importResult = runCommandChecked("opencode", importArgs, {
+      cwd: importCwd,
       env: options.env,
       maxBuffer: 1024 * 1024 * 10
     });
