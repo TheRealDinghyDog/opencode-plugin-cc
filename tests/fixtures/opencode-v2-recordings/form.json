@@ -1,0 +1,724 @@
+{
+ "name": "form",
+ "sid": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+ "outcome": "session.execution.interrupted",
+ "promptStatus": 200,
+ "events": [
+  {
+   "id": "evt_109a59c060014NmEFHc8Tjeg5T",
+   "type": "server.connected",
+   "data": {}
+  },
+  {
+   "id": "evt_109a59c38001aGb39ZIueTucrP",
+   "created": 1791163210808,
+   "type": "worktree.resolved",
+   "data": {
+    "projectID": "13151c8c8424fa29eeb087a4e13b35ff288512c8",
+    "directory": "/tmp/workspace",
+    "previous": "global"
+   },
+   "durable": {
+    "aggregateID": "13151c8c8424fa29eeb087a4e13b35ff288512c8",
+    "seq": 0,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a59c3a001oFjSYmzHY7AcX5",
+   "created": 1791163210810,
+   "type": "session.created",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "slug": "shiny-planet",
+    "version": "2.0.20",
+    "projectID": "13151c8c8424fa29eeb087a4e13b35ff288512c8",
+    "location": {
+     "directory": "/tmp/workspace"
+    },
+    "subpath": "",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 0,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a59c64001Eq4EeqI0vXmjSZ",
+   "created": 1791163210852,
+   "type": "project.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "id": "13151c8c8424fa29eeb087a4e13b35ff288512c8",
+    "canonical": "/tmp/workspace",
+    "vcs": "git",
+    "time": {
+     "created": 1791163210805,
+     "updated": 1791163210805,
+     "active": 1791163210851
+    },
+    "sandboxes": []
+   }
+  },
+  {
+   "id": "evt_109a59e470018TX95mPjzE7qF0",
+   "created": 1791163211335,
+   "type": "integration.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a59e4a001M0bTdYnYyX9jxL",
+   "created": 1791163211338,
+   "type": "provider.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a59e53001nviGFL23xqOYe8",
+   "created": 1791163211347,
+   "type": "model.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a59e78001tYdXCrDi4NK9XJ",
+   "created": 1791163211384,
+   "type": "vcs.branch.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "branch": "main"
+   }
+  },
+  {
+   "id": "evt_109a59e780020WXtSs0L8fdDyD",
+   "created": 1791163211384,
+   "type": "agent.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a59e79001evcBiHZk8cnR9N",
+   "created": 1791163211385,
+   "type": "command.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a59e79002BGJN3RYQEQICjJ",
+   "created": 1791163211385,
+   "type": "skill.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a59e7b001mWa63OwlUt7K3C",
+   "created": 1791163211387,
+   "type": "websearch.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a59e7b003zaC9aKG3qAH1XA",
+   "created": 1791163211387,
+   "type": "reference.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a59e8800151am6Bs4hFtZPm",
+   "created": 1791163211400,
+   "type": "plugin.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {}
+  },
+  {
+   "id": "evt_109a59e89001rOTAqo3tfFfjo9",
+   "created": 1791163211401,
+   "type": "session.inbox.enqueued",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "inboxID": "msg_109a59ca4001OpIJV6t4QFn54q",
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "item": {
+     "type": "user",
+     "payload": {
+      "text": "Use the question tool to ask me whether I prefer red or blue (two options). Then tell me what I answered."
+     },
+     "delivery": "steer"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 1,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a59e8a001XUmtzopQe0tiwV",
+   "created": 1791163211402,
+   "type": "session.execution.started",
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 2,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a59e96001keweIgwxazGxlP",
+   "created": 1791163211414,
+   "metadata": {
+    "instructions": {
+     "initial": true
+    }
+   },
+   "type": "session.instructions.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "delta": {
+     "core/codemode": "616a7ad8b8e40e8a71eab238dfbbe9eaf0f4a9e6fdad853226d075bfe602e1e6",
+     "core/skill-guidance": "59bf307ea999cd149e77936c3e695752fa23949e3a3c63c50515568bb71b0c99",
+     "core/date": "5c3ade85f6455ad46661f59c7b66a8fa997d86a35616f652f28ff2e8c891b5aa",
+     "core/environment": "082ac38002abbfb592ac43676869dfa19d1be705b8b5cbdee6b95eb8b4a486be"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 3,
+    "version": 2
+   }
+  },
+  {
+   "id": "evt_109a59e97001QO1w7Wnq9O06X9",
+   "created": 1791163211415,
+   "type": "session.inbox.delivered",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "inboxID": "msg_109a59ca4001OpIJV6t4QFn54q"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 4,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5a283001xk8zESu5xF6gzC",
+   "created": 1791163212419,
+   "type": "session.step.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "started": 1791163211517
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 5,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5a287001aAUcduBMsYexaN",
+   "created": 1791163212423,
+   "type": "session.text.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "ordinal": 0
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 6,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5a2f0001ttFWzc8fv8vEQk",
+   "created": 1791163212528,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "ordinal": 0,
+    "delta": "I"
+   }
+  },
+  {
+   "id": "evt_109a5a2fe001V1tGvRxA9W2ng6",
+   "created": 1791163212542,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "cost": 3.700400000000001e-05,
+    "tokens": {
+     "input": 30,
+     "output": 3,
+     "reasoning": 0,
+     "cache": {
+      "read": 512,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a5a2ff001HIPrrUnlTil72N",
+   "created": 1791163212543,
+   "type": "session.renamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "title": "Color preference question"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 8,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5a376001j1NINQhKi47F5I",
+   "created": 1791163212662,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "ordinal": 0,
+    "delta": "'ll ask you that question"
+   }
+  },
+  {
+   "id": "evt_109a5a38e001BbhhudoDJNjnrk",
+   "created": 1791163212686,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "ordinal": 0,
+    "delta": " now."
+   }
+  },
+  {
+   "id": "evt_109a5a38e0024wXQrB8GufAquM",
+   "created": 1791163212686,
+   "type": "session.tool.input.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "id": "call_00_M5IGt9e8KVcKtjMBFrsb0007",
+    "name": "question"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 9,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5a53b001vGbDhNkwTVkz0l",
+   "created": 1791163213115,
+   "type": "session.tool.input.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "id": "call_00_M5IGt9e8KVcKtjMBFrsb0007",
+    "text": "{\"questions\": [{\"question\": \"Do you prefer red or blue?\", \"header\": \"Color preference\", \"options\": [{\"label\": \"Red\", \"description\": \"You prefer the color red.\"}, {\"label\": \"Blue\", \"description\": \"You prefer the color blue.\"}]}]}"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 10,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5a53f001K7HYMWxVMSUhG9",
+   "created": 1791163213119,
+   "type": "session.tool.called",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "id": "call_00_M5IGt9e8KVcKtjMBFrsb0007",
+    "input": {
+     "questions": [
+      {
+       "question": "Do you prefer red or blue?",
+       "header": "Color preference",
+       "options": [
+        {
+         "label": "Red",
+         "description": "You prefer the color red."
+        },
+        {
+         "label": "Blue",
+         "description": "You prefer the color blue."
+        }
+       ]
+      }
+     ]
+    },
+    "executed": false
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 11,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5a541001zFVgtY50kDsEPE",
+   "created": 1791163213121,
+   "type": "session.text.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "ordinal": 0,
+    "text": "I'll ask you that question now."
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 12,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5a54300136XJk2xElapuWf",
+   "created": 1791163213123,
+   "type": "session.step.streamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 13,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5a546002d5FAqbwYP8Upmc",
+   "created": 1791163213126,
+   "type": "form.created",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "form": {
+     "id": "frm_109a5a54600119slUIf67uU6mS",
+     "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+     "title": "Questions",
+     "metadata": {
+      "kind": "question",
+      "tool": {
+       "messageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+       "id": "call_00_M5IGt9e8KVcKtjMBFrsb0007"
+      }
+     },
+     "fields": [
+      {
+       "key": "q0",
+       "title": "Color preference",
+       "description": "Do you prefer red or blue?",
+       "type": "string",
+       "options": [
+        {
+         "value": "Red",
+         "label": "Red",
+         "description": "You prefer the color red."
+        },
+        {
+         "value": "Blue",
+         "label": "Blue",
+         "description": "You prefer the color blue."
+        }
+       ],
+       "custom": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "evt_109a5a54c001dZFdiYVlS3sSTT",
+   "created": 1791163213132,
+   "type": "form.cancelled",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "id": "frm_109a5a54600119slUIf67uU6mS",
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y"
+   }
+  },
+  {
+   "id": "evt_109a5a54d00128fn3ZfoRDk8nt",
+   "created": 1791163213133,
+   "type": "session.tool.failed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "id": "call_00_M5IGt9e8KVcKtjMBFrsb0007",
+    "error": {
+     "type": "aborted",
+     "message": "The user dismissed this question"
+    },
+    "executed": false
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 14,
+    "version": 2
+   }
+  },
+  {
+   "id": "evt_109a5a56e001HNAf8vlh2ZU6UU",
+   "created": 1791163213166,
+   "type": "session.step.failed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "assistantMessageID": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "error": {
+     "type": "aborted",
+     "message": "Step interrupted"
+    },
+    "rawFinish": "tool_calls",
+    "cost": 0.0026273280000000004,
+    "tokens": {
+     "input": 3458,
+     "output": 106,
+     "reasoning": 0,
+     "cache": {
+      "read": 6144,
+      "write": 0
+     }
+    },
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "files": []
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 15,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5a5700016BDvq5T1ZngMeI",
+   "created": 1791163213168,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "cost": 0.0026643320000000006,
+    "tokens": {
+     "input": 3488,
+     "output": 109,
+     "reasoning": 0,
+     "cache": {
+      "read": 6656,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a5a570002cJNBRQ9ZzOjK02",
+   "created": 1791163213168,
+   "type": "session.execution.interrupted",
+   "data": {
+    "sessionID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "reason": "shutdown"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65a63f8ffe055vSmWVlrvs0y",
+    "seq": 16,
+    "version": 1
+   }
+  }
+ ],
+ "messages": {
+  "data": [
+   {
+    "id": "msg_109a59ea1001p23ZHiK06Bqcdw",
+    "time": {
+     "created": 1791163211517,
+     "streamed": 1791163213123,
+     "completed": 1791163213166
+    },
+    "type": "assistant",
+    "agent": "build",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "content": [
+     {
+      "type": "text",
+      "text": "I'll ask you that question now."
+     },
+     {
+      "type": "tool",
+      "id": "call_00_M5IGt9e8KVcKtjMBFrsb0007",
+      "name": "question",
+      "executed": false,
+      "state": {
+       "status": "error",
+       "input": {
+        "questions": [
+         {
+          "question": "Do you prefer red or blue?",
+          "header": "Color preference",
+          "options": [
+           {
+            "label": "Red",
+            "description": "You prefer the color red."
+           },
+           {
+            "label": "Blue",
+            "description": "You prefer the color blue."
+           }
+          ]
+         }
+        ]
+       },
+       "error": {
+        "type": "aborted",
+        "message": "The user dismissed this question"
+       }
+      },
+      "time": {
+       "created": 1791163212686,
+       "ran": 1791163213119,
+       "completed": 1791163213133
+      }
+     }
+    ],
+    "snapshot": {
+     "start": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "end": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "files": []
+    },
+    "finish": "error",
+    "rawFinish": "tool_calls",
+    "cost": 0.0026273280000000004,
+    "tokens": {
+     "input": 3458,
+     "output": 106,
+     "reasoning": 0,
+     "cache": {
+      "read": 6144,
+      "write": 0
+     }
+    },
+    "error": {
+     "type": "aborted",
+     "message": "Step interrupted"
+    }
+   },
+   {
+    "id": "msg_109a59ca4001OpIJV6t4QFn54q",
+    "time": {
+     "created": 1791163211415
+    },
+    "text": "Use the question tool to ask me whether I prefer red or blue (two options). Then tell me what I answered.",
+    "type": "user"
+   }
+  ],
+  "cursor": {
+   "previous": "eyJpZCI6Im1zZ18xMDlhNTllYTEwMDFwMjNaSGlLMDZCcWNkdyIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+   "next": "eyJpZCI6Im1zZ18xMDlhNTljYTQwMDFPcElKVjZ0NFFGbjU0cSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+  }
+ },
+ "permissions": {
+  "data": []
+ },
+ "forms": {
+  "data": []
+ }
+}

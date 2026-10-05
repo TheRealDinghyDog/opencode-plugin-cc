@@ -1,5 +1,5 @@
 {
-  "source": "opencode /openapi.json",
+  "source": "opencode /openapi.json; events and message items recorded from real runs",
   "version": "2.0.20",
   "routes": [
     { "method": "GET", "path": "/api/info" },
@@ -17,7 +17,60 @@
     { "method": "GET", "path": "/api/session/{sessionID}/permission" },
     { "method": "POST", "path": "/api/session/{sessionID}/permission/{requestID}/reply" },
     { "method": "GET", "path": "/api/session/{sessionID}/form" },
-    { "method": "POST", "path": "/api/session/{sessionID}/form/{formID}/reply" },
+    { "method": "DELETE", "path": "/api/session/{sessionID}/form/{formID}" },
     { "method": "POST", "path": "/api/experimental/session/import" }
-  ]
+  ],
+  "requests": {
+    "POST /api/session": { "sends": ["title", "agent", "model", "location"] },
+    "POST /api/session/{sessionID}/prompt": { "sends": ["text"] },
+    "POST /api/session/{sessionID}/permission/{requestID}/reply": { "sends": ["decision", "message"] },
+    "POST /api/experimental/session/import": { "sends": ["info", "messages", "location"] }
+  },
+  "envelope": { "required": ["id", "type", "data"] },
+  "events": {
+    "server.connected": { "required": [] },
+    "session.created": {
+      "required": ["sessionID", "slug", "version", "projectID", "location", "subpath", "agent"],
+      "optional": ["parentID", "title", "model"]
+    },
+    "session.execution.started": { "required": ["sessionID"] },
+    "session.execution.succeeded": { "required": ["sessionID"] },
+    "session.execution.failed": { "required": ["sessionID", "error"], "nested": { "error": ["type", "message"] } },
+    "session.execution.interrupted": { "required": ["sessionID", "reason"] },
+    "session.step.started": {
+      "required": ["sessionID", "assistantMessageID", "agent", "model", "snapshot", "started"]
+    },
+    "session.step.ended": {
+      "required": ["sessionID", "assistantMessageID", "finish", "rawFinish", "cost", "tokens", "snapshot", "files"]
+    },
+    "session.step.failed": {
+      "required": ["sessionID", "assistantMessageID", "error", "snapshot", "files"],
+      "optional": ["rawFinish", "cost", "tokens"],
+      "nested": { "error": ["type", "message"] }
+    },
+    "session.text.started": { "required": ["sessionID", "assistantMessageID", "ordinal"] },
+    "session.text.delta": { "required": ["sessionID", "assistantMessageID", "ordinal", "delta"] },
+    "session.text.ended": { "required": ["sessionID", "assistantMessageID", "ordinal", "text"] },
+    "session.tool.called": { "required": ["sessionID", "assistantMessageID", "id", "input", "executed"] },
+    "session.tool.success": {
+      "required": ["sessionID", "assistantMessageID", "id", "content", "metadata", "executed"]
+    },
+    "session.tool.failed": {
+      "required": ["sessionID", "assistantMessageID", "id", "error", "executed"],
+      "nested": { "error": ["type", "message"] }
+    },
+    "permission.asked": {
+      "required": ["id", "sessionID", "action", "resources", "save", "source"],
+      "nested": { "source": ["type", "messageID", "id"] }
+    },
+    "permission.replied": { "required": ["sessionID", "requestID", "reply"] },
+    "form.created": { "required": ["form"], "nested": { "form": ["id", "sessionID", "title", "metadata", "fields"] } },
+    "form.cancelled": { "required": ["id", "sessionID"] }
+  },
+  "messages": {
+    "user": ["id", "type", "time", "text"],
+    "assistant": ["id", "type", "time", "agent", "model", "content", "finish"],
+    "idle": ["id", "type", "time", "outcome"],
+    "synthetic": ["id", "type", "time", "text"]
+  }
 }

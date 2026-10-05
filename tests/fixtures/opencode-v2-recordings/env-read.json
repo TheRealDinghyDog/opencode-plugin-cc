@@ -1,0 +1,789 @@
+{
+ "name": "env-read",
+ "sid": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+ "outcome": "session.execution.succeeded",
+ "promptStatus": 200,
+ "events": [
+  {
+   "id": "evt_109a53c6e001Z9dVsnfaiV7B3x",
+   "created": 1791163186286,
+   "type": "session.created",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "slug": "lucky-knight",
+    "version": "2.0.20",
+    "projectID": "1ada4a79449f4696c69aac673f4b2b0da6cc784b",
+    "location": {
+     "directory": "/tmp/workspace"
+    },
+    "subpath": "",
+    "agent": "plan",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 0,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a53c6f002VahqtJ6NigLppv",
+   "created": 1791163186287,
+   "type": "session.inbox.enqueued",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "inboxID": "msg_109a53c6f0010sUNaVWTy3ccbF",
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "item": {
+     "type": "synthetic",
+     "payload": {
+      "text": "<system-reminder>\nYou are in Plan mode. Discuss the plan with the user directly in the conversation. Do not create or update plan files unless the user explicitly asks you to; when they do, write them only in:\n/home/user/.opencode/plan\n\nDo not modify any other files or ask a subagent to do so.\n\nYou remain in Plan mode until the user switches agents. If the user asks you to implement changes, do not do so. Tell them they need to switch agents.\n</system-reminder>"
+     },
+     "delivery": "steer"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 1,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a53c73001rV1R7dI4hBGOlM",
+   "created": 1791163186291,
+   "type": "session.inbox.enqueued",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "inboxID": "msg_109a53c72001etdRjRZb0wlqTu",
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "item": {
+     "type": "user",
+     "payload": {
+      "text": "Use the read tool to read the file .env in the current directory and print its contents."
+     },
+     "delivery": "steer"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 2,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a53c74001AGpSecscX8QFD2",
+   "created": 1791163186292,
+   "type": "session.execution.started",
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 3,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a53c78001Hlh07wIJAAvvgz",
+   "created": 1791163186296,
+   "metadata": {
+    "instructions": {
+     "initial": true
+    }
+   },
+   "type": "session.instructions.updated",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "delta": {
+     "core/codemode": "616a7ad8b8e40e8a71eab238dfbbe9eaf0f4a9e6fdad853226d075bfe602e1e6",
+     "core/skill-guidance": "59bf307ea999cd149e77936c3e695752fa23949e3a3c63c50515568bb71b0c99",
+     "core/date": "5c3ade85f6455ad46661f59c7b66a8fa997d86a35616f652f28ff2e8c891b5aa",
+     "core/environment": "1744650d2d35afdce858e8a685c7cce043d6e26f4cc518f00d15c2b356888107"
+    }
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 4,
+    "version": 2
+   }
+  },
+  {
+   "id": "evt_109a53c79001Ho6b1NEXBXj8jS",
+   "created": 1791163186297,
+   "type": "session.inbox.delivered",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "inboxID": "msg_109a53c6f0010sUNaVWTy3ccbF"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 5,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a53c7a001545eUvHsnyP0n3",
+   "created": 1791163186298,
+   "type": "session.inbox.delivered",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "inboxID": "msg_109a53c72001etdRjRZb0wlqTu"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 6,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a540690016bExZEIOtVwBD4",
+   "created": 1791163187305,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "cost": 3.7664000000000004e-05,
+    "tokens": {
+     "input": 25,
+     "output": 5,
+     "reasoning": 0,
+     "cache": {
+      "read": 512,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a5406a001jQ1gbXU7qTpu14",
+   "created": 1791163187306,
+   "type": "session.renamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "title": "Read .env file contents"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 8,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a54147001v3p3MB0nXj5gjv",
+   "created": 1791163187527,
+   "type": "session.step.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "agent": "plan",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "assistantMessageID": "msg_109a53c80001E5msVzJv3JsF5P",
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "started": 1791163186339
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 9,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5414c001DG7E0YAp9acCip",
+   "created": 1791163187532,
+   "type": "session.tool.input.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a53c80001E5msVzJv3JsF5P",
+    "id": "call_00_mk9a45xl5QoYQ1u9bHVC7955",
+    "name": "read"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 10,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5424d001aoC4iLW3KLNOBU",
+   "created": 1791163187789,
+   "type": "session.tool.input.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a53c80001E5msVzJv3JsF5P",
+    "id": "call_00_mk9a45xl5QoYQ1u9bHVC7955",
+    "text": "{\"path\": \"/tmp/workspace/.env\"}"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 11,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5424f001BKOgXXxednZTby",
+   "created": 1791163187792,
+   "type": "session.tool.called",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a53c80001E5msVzJv3JsF5P",
+    "id": "call_00_mk9a45xl5QoYQ1u9bHVC7955",
+    "input": {
+     "path": "/tmp/workspace/.env"
+    },
+    "executed": false
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 12,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a54251001TdLJAjrTE0zjim",
+   "created": 1791163187793,
+   "type": "session.step.streamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a53c80001E5msVzJv3JsF5P"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 13,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a54255001BcDc25x8vgd0c3",
+   "created": 1791163187797,
+   "type": "permission.asked",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "id": "per_109a54254001hx91hTimyIVe7f",
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "action": "read",
+    "resources": [
+     ".env"
+    ],
+    "save": [
+     "*"
+    ],
+    "source": {
+     "type": "tool",
+     "messageID": "msg_109a53c80001E5msVzJv3JsF5P",
+     "id": "call_00_mk9a45xl5QoYQ1u9bHVC7955"
+    }
+   }
+  },
+  {
+   "id": "evt_109a5425900107ajfi5ot4d9RE",
+   "created": 1791163187801,
+   "type": "permission.replied",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "requestID": "per_109a54254001hx91hTimyIVe7f",
+    "reply": "reject"
+   }
+  },
+  {
+   "id": "evt_109a54259002wMQrb6NSHDmTVn",
+   "created": 1791163187801,
+   "type": "session.tool.failed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a53c80001E5msVzJv3JsF5P",
+    "id": "call_00_mk9a45xl5QoYQ1u9bHVC7955",
+    "error": {
+     "type": "permission.rejected",
+     "message": "Headless companion run: rejected."
+    },
+    "executed": false
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 14,
+    "version": 2
+   }
+  },
+  {
+   "id": "evt_109a5427a001Cdd2h16xcSe2hv",
+   "created": 1791163187834,
+   "type": "session.step.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a53c80001E5msVzJv3JsF5P",
+    "finish": "tool-calls",
+    "rawFinish": "tool_calls",
+    "cost": 0.000525844,
+    "tokens": {
+     "input": 238,
+     "output": 81,
+     "reasoning": 0,
+     "cache": {
+      "read": 9472,
+      "write": 0
+     }
+    },
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "files": []
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 15,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5427b001FNa8XvneuDZiOg",
+   "created": 1791163187835,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "cost": 0.000563508,
+    "tokens": {
+     "input": 263,
+     "output": 86,
+     "reasoning": 0,
+     "cache": {
+      "read": 9984,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a5462b001RnUto6sEY2zUDi",
+   "created": 1791163188779,
+   "type": "session.step.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "agent": "plan",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "started": 1791163187870
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 16,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a54632001dcpF9gD5vqnSKe",
+   "created": 1791163188786,
+   "type": "session.text.started",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "ordinal": 0
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 17,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a54699001WZkQkwIkO9lBvn",
+   "created": 1791163188889,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "ordinal": 0,
+    "delta": "The read was"
+   }
+  },
+  {
+   "id": "evt_109a54700001pqp4JM7hiEBWJ5",
+   "created": 1791163188992,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "ordinal": 0,
+    "delta": " rejected by the environment's permission system (\"Headless companion run: rejected"
+   }
+  },
+  {
+   "id": "evt_109a5476f00172A0VxbnAgHs80",
+   "created": 1791163189103,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "ordinal": 0,
+    "delta": ".\"). I'm not able to read the `.env` file in this session"
+   }
+  },
+  {
+   "id": "evt_109a547d9001H9ZulwnA0XHQ1r",
+   "created": 1791163189209,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "ordinal": 0,
+    "delta": ".\n\nIs there something specific you're hoping"
+   }
+  },
+  {
+   "id": "evt_109a54845001fn25MDTBF5hkWy",
+   "created": 1791163189317,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "ordinal": 0,
+    "delta": " to check in that file? If you can tell me what"
+   }
+  },
+  {
+   "id": "evt_109a548b4001OVxaYwf3xYseDt",
+   "created": 1791163189428,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "ordinal": 0,
+    "delta": " you're looking for, I can suggest an alternative approach \u2014 but note"
+   }
+  },
+  {
+   "id": "evt_109a5491d0014fw5dDpxgZrcsZ",
+   "created": 1791163189534,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "ordinal": 0,
+    "delta": " that I'm currently in Plan mode and restricted from reading that"
+   }
+  },
+  {
+   "id": "evt_109a54973001iCXbRIEC51ocxh",
+   "created": 1791163189619,
+   "type": "session.text.delta",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "ordinal": 0,
+    "delta": " particular file."
+   }
+  },
+  {
+   "id": "evt_109a549740015UkkjmXWNiS9vI",
+   "created": 1791163189620,
+   "type": "session.text.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "ordinal": 0,
+    "text": "The read was rejected by the environment's permission system (\"Headless companion run: rejected.\"). I'm not able to read the `.env` file in this session.\n\nIs there something specific you're hoping to check in that file? If you can tell me what you're looking for, I can suggest an alternative approach \u2014 but note that I'm currently in Plan mode and restricted from reading that particular file."
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 18,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a54977001AKhUiHBjzh9dW7",
+   "created": 1791163189623,
+   "type": "session.step.streamed",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 19,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5499a001pbP1f7PKFqYKMA",
+   "created": 1791163189658,
+   "type": "session.step.ended",
+   "location": {
+    "directory": "/tmp/workspace"
+   },
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "assistantMessageID": "msg_109a54280001adADzxtliw0gQq",
+    "finish": "stop",
+    "rawFinish": "stop",
+    "cost": 0.000441716,
+    "tokens": {
+     "input": 99,
+     "output": 82,
+     "reasoning": 0,
+     "cache": {
+      "read": 9728,
+      "write": 0
+     }
+    },
+    "snapshot": "d210871cd17e596b8477ec97806c9cd40973081b",
+    "files": []
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 20,
+    "version": 1
+   }
+  },
+  {
+   "id": "evt_109a5499b001JIITD92vxSc6E4",
+   "created": 1791163189659,
+   "type": "session.usage.updated",
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "cost": 0.0010052239999999999,
+    "tokens": {
+     "input": 362,
+     "output": 168,
+     "reasoning": 0,
+     "cache": {
+      "read": 19712,
+      "write": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_109a5499c001oS23xmeE31OkIs",
+   "created": 1791163189660,
+   "type": "session.execution.succeeded",
+   "data": {
+    "sessionID": "ses_ef65ac3beffeHGPa1TDpo5MJJC"
+   },
+   "durable": {
+    "aggregateID": "ses_ef65ac3beffeHGPa1TDpo5MJJC",
+    "seq": 21,
+    "version": 1
+   }
+  }
+ ],
+ "messages": {
+  "data": [
+   {
+    "id": "msg_109a5499c001oS23xmeE31OkIs",
+    "time": {
+     "created": 1791163189660
+    },
+    "type": "idle",
+    "outcome": "succeeded"
+   },
+   {
+    "id": "msg_109a54280001adADzxtliw0gQq",
+    "time": {
+     "created": 1791163187870,
+     "streamed": 1791163189623,
+     "completed": 1791163189658
+    },
+    "type": "assistant",
+    "agent": "plan",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "content": [
+     {
+      "type": "text",
+      "text": "The read was rejected by the environment's permission system (\"Headless companion run: rejected.\"). I'm not able to read the `.env` file in this session.\n\nIs there something specific you're hoping to check in that file? If you can tell me what you're looking for, I can suggest an alternative approach \u2014 but note that I'm currently in Plan mode and restricted from reading that particular file."
+     }
+    ],
+    "snapshot": {
+     "start": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "end": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "files": []
+    },
+    "finish": "stop",
+    "rawFinish": "stop",
+    "cost": 0.000441716,
+    "tokens": {
+     "input": 99,
+     "output": 82,
+     "reasoning": 0,
+     "cache": {
+      "read": 9728,
+      "write": 0
+     }
+    }
+   },
+   {
+    "id": "msg_109a53c80001E5msVzJv3JsF5P",
+    "time": {
+     "created": 1791163186339,
+     "streamed": 1791163187793,
+     "completed": 1791163187834
+    },
+    "type": "assistant",
+    "agent": "plan",
+    "model": {
+     "id": "deepseek-v4-pro",
+     "providerID": "deepseek",
+     "variant": "none"
+    },
+    "content": [
+     {
+      "type": "tool",
+      "id": "call_00_mk9a45xl5QoYQ1u9bHVC7955",
+      "name": "read",
+      "executed": false,
+      "state": {
+       "status": "error",
+       "input": {
+        "path": "/tmp/workspace/.env"
+       },
+       "error": {
+        "type": "permission.rejected",
+        "message": "Headless companion run: rejected."
+       }
+      },
+      "time": {
+       "created": 1791163187532,
+       "ran": 1791163187792,
+       "completed": 1791163187801
+      }
+     }
+    ],
+    "snapshot": {
+     "start": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "end": "d210871cd17e596b8477ec97806c9cd40973081b",
+     "files": []
+    },
+    "finish": "tool-calls",
+    "rawFinish": "tool_calls",
+    "cost": 0.000525844,
+    "tokens": {
+     "input": 238,
+     "output": 81,
+     "reasoning": 0,
+     "cache": {
+      "read": 9472,
+      "write": 0
+     }
+    }
+   },
+   {
+    "id": "msg_109a53c72001etdRjRZb0wlqTu",
+    "time": {
+     "created": 1791163186298
+    },
+    "text": "Use the read tool to read the file .env in the current directory and print its contents.",
+    "type": "user"
+   },
+   {
+    "id": "msg_109a53c6f0010sUNaVWTy3ccbF",
+    "time": {
+     "created": 1791163186297
+    },
+    "text": "<system-reminder>\nYou are in Plan mode. Discuss the plan with the user directly in the conversation. Do not create or update plan files unless the user explicitly asks you to; when they do, write them only in:\n/home/user/.opencode/plan\n\nDo not modify any other files or ask a subagent to do so.\n\nYou remain in Plan mode until the user switches agents. If the user asks you to implement changes, do not do so. Tell them they need to switch agents.\n</system-reminder>",
+    "type": "synthetic"
+   }
+  ],
+  "cursor": {
+   "previous": "eyJpZCI6Im1zZ18xMDlhNTQ5OWMwMDFvUzIzeG1lRTMxT2tJcyIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+   "next": "eyJpZCI6Im1zZ18xMDlhNTNjNmYwMDEwc1VOYVZXVHkzY2NiRiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+  }
+ },
+ "permissions": {
+  "data": []
+ },
+ "forms": {
+  "data": []
+ }
+}
