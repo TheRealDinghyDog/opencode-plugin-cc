@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
 
+import { lockIsStale, readLockOwner, releaseLock, stealStaleLock, tryCreateLock } from "./lock-dir.mjs";
 import { OpencodeServerClient } from "./opencode-server.mjs";
 import {
   commandLineLooksLikeOpencodeServe,
@@ -27,7 +28,6 @@ const OWNED_SERVER_USERNAME = "opencode";
 
 const SERVER_STATE_FILE = "server.json";
 const SERVER_LOCK_DIR = "server.lock";
-const SERVER_LOCK_INFO_FILE = "owner.json";
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const DEFAULT_LOCK_STALE_MS = 30000;
 const DEFAULT_LOCK_POLL_MS = 100;
@@ -141,77 +141,6 @@ function processIsAlive(pid) {
   }
 }
 
-function readServerLockInfo(lockDir) {
-  const infoFile = path.join(lockDir, SERVER_LOCK_INFO_FILE);
-  try {
-    return JSON.parse(fs.readFileSync(infoFile, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function serverLockAgeMs(lockDir, info) {
-  const created = Date.parse(info?.createdAt ?? "");
-  if (Number.isFinite(created)) {
-    return Date.now() - created;
-  }
-
-  try {
-    return Date.now() - fs.statSync(lockDir).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-
-function isServerLockStale(lockDir, staleMs) {
-  if (!fs.existsSync(lockDir)) {
-    return true;
-  }
-
-  const info = readServerLockInfo(lockDir);
-  const ownerPid = Number(info?.pid);
-  if (processIsAlive(ownerPid) === false) {
-    return true;
-  }
-
-  // Age is only a backstop for zombie/reused PIDs where liveness is unreliable;
-  // staleMs (default 30s) is well past normal startup (timeoutMs default 10s),
-  // and the atomic steal bounds any misfire against a live owner to one winner.
-  return serverLockAgeMs(lockDir, info) > staleMs;
-}
-
-function removeServerLock(lockDir) {
-  try {
-    fs.rmSync(lockDir, { recursive: true, force: true });
-  } catch {
-    // Another process may have removed or replaced the lock.
-  }
-}
-
-function stealStaleServerLock(lockDir) {
-  // Atomically move the stale lock aside instead of removing it in place.
-  // renameSync has a single winner, so concurrent stealers cannot all clear the
-  // path — a blind remove could delete a lock another process just created. The
-  // winner deletes the moved copy; losers get ENOENT and re-race the atomic
-  // mkdir. Residual: a lock refreshed within the rename window could be moved,
-  // which is rare and costs at most one orphaned local server.
-  const stealPath = `${lockDir}.stale-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  try {
-    fs.renameSync(lockDir, stealPath);
-  } catch {
-    return;
-  }
-  removeServerLock(stealPath);
-}
-
-function releaseServerLock(lockDir, token) {
-  const info = readServerLockInfo(lockDir);
-  if (info?.token !== token) {
-    return;
-  }
-  removeServerLock(lockDir);
-}
-
 async function loadHealthyServerSession(cwd, healthTimeoutMs) {
   const existing = loadServerSession(cwd);
   if (existing?.url && (await isServerHealthy(existing.url, healthTimeoutMs, serverSessionCredentials(existing)))) {
@@ -285,40 +214,21 @@ async function acquireServerLock(cwd, options = {}) {
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   for (;;) {
-    try {
-      fs.mkdirSync(lockDir);
-    } catch (error) {
-      if (error?.code !== "EEXIST") {
-        throw error;
-      }
-
-      // If the holder looks stale, clear it via an atomic single-winner steal
-      // (never a blind remove), then re-race the mkdir.
-      if (isServerLockStale(lockDir, staleMs)) {
-        stealStaleServerLock(lockDir);
-      }
-      if (deadline != null && Date.now() >= deadline) {
-        return null;
-      }
-      await sleep(deadline == null ? pollMs : Math.min(pollMs, Math.max(1, deadline - Date.now())));
-      continue;
+    if (tryCreateLock(lockDir, token)) {
+      return {
+        release: () => releaseLock(lockDir, token)
+      };
     }
-
-    // We own the freshly created lock dir; record ownership. If that write
-    // fails, remove the dir so we do not leak an unowned lock others wait out.
-    try {
-      fs.writeFileSync(
-        path.join(lockDir, SERVER_LOCK_INFO_FILE),
-        `${JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }, null, 2)}\n`,
-        "utf8"
-      );
-    } catch (error) {
-      removeServerLock(lockDir);
-      throw error;
+    // Steal only the lock that was judged stale; a lock taken again after we
+    // looked is put back, never deleted (issue #68).
+    const owner = readLockOwner(lockDir);
+    if (lockIsStale(lockDir, owner, staleMs)) {
+      stealStaleLock(lockDir, owner.token);
     }
-    return {
-      release: () => releaseServerLock(lockDir, token)
-    };
+    if (deadline != null && Date.now() >= deadline) {
+      return null;
+    }
+    await sleep(deadline == null ? pollMs : Math.min(pollMs, Math.max(1, deadline - Date.now())));
   }
 }
 
