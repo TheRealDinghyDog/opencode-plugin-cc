@@ -87,7 +87,8 @@ export class OpencodeV2Client {
       method,
       headers: {
         ...(options.body === undefined ? {} : { "content-type": "application/json" }),
-        ...this.authHeaders()
+        ...this.authHeaders(),
+        ...(options.headers ?? {})
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.signal
@@ -104,7 +105,10 @@ export class OpencodeV2Client {
   }
 
   info(options = {}) {
-    return this.request("GET", "/api/info", { signal: options.signal });
+    return this.request("GET", "/api/info", {
+      signal: options.signal,
+      headers: options.closeConnection ? { connection: "close" } : undefined
+    });
   }
 
   async health(options = {}) {

@@ -7,7 +7,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { ensureServer, isServerHealthy, loadServerSession, saveServerSession, teardownServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+import {
+  detectServerApi,
+  ensureServer,
+  isServerHealthy,
+  loadServerSession,
+  saveServerSession,
+  teardownServerSession
+} from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
 import { installFakeOpencode } from "./fake-opencode-fixture.mjs";
 import { resolveStateDir } from "../plugins/opencode/scripts/lib/state.mjs";
 import { commandLineLooksLikeOpencodeServe, readProcessCommandLine } from "../plugins/opencode/scripts/lib/process.mjs";
@@ -794,6 +801,37 @@ test(
           process.env[key] = value;
         }
       }
+    }
+  }
+);
+
+// Issue #71: on Windows, ensureServer runs PowerShell (spawnSync, which
+// blocks the event loop) right after the health probe. A keep-alive socket
+// the probe left in fetch's pool went stale meanwhile, and the next request,
+// POST /session, failed with ECONNRESET. Probes must not leave one behind.
+test(
+  "server probes leave no pooled connection open",
+  { skip: LOCAL_LISTEN_AVAILABLE ? false : "local 127.0.0.1 listen is unavailable in this sandbox" },
+  async () => {
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ healthy: true, version: "1.17.15" }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${server.address().port}`;
+    const openConnections = () => new Promise((resolve) => server.getConnections((error, count) => resolve(count)));
+
+    try {
+      assert.equal(await detectServerApi(url, 2000), 1);
+      let open = await openConnections();
+      for (let attempt = 0; attempt < 20 && open > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        open = await openConnections();
+      }
+      assert.equal(open, 0, "the probe's connection is closed, not pooled");
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise((resolve) => server.close(resolve));
     }
   }
 );
