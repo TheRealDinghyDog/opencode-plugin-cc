@@ -6,11 +6,13 @@ import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
 import {
+  getConfig,
   resolveJobFile,
   resolveJobLogFile,
   resolveStateDir,
   resolveStateFile,
   saveState,
+  setConfig,
   withStateLock,
   withStateLockAsync
 } from "../plugins/opencode/scripts/lib/state.mjs";
@@ -62,6 +64,61 @@ test("resolveStateDir uses CLAUDE_PLUGIN_DATA when it is provided", () => {
       process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
     }
   }
+});
+
+function withEnv(patch, fn) {
+  const previous = Object.fromEntries(Object.keys(patch).map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(patch)) {
+    if (value == null) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value == null) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+test("resolveStateDir prefers OPENCODE_COMPANION_PLUGIN_DATA over CLAUDE_PLUGIN_DATA", () => {
+  const workspace = makeTempDir();
+  const ownDataDir = makeTempDir();
+  const otherDataDir = makeTempDir();
+
+  const stateDir = withEnv(
+    { OPENCODE_COMPANION_PLUGIN_DATA: ownDataDir, CLAUDE_PLUGIN_DATA: otherDataDir },
+    () => resolveStateDir(workspace)
+  );
+
+  assert.equal(stateDir.startsWith(path.join(ownDataDir, "state")), true);
+});
+
+// Issue #61: every plugin's SessionStart hook writes to one session env file, so
+// the commands Claude runs can see another plugin's CLAUDE_PLUGIN_DATA. Hooks
+// get this plugin's own CLAUDE_PLUGIN_DATA from Claude Code. Both must resolve
+// the same state, or a review gate set by /opencode:setup never reaches the
+// stop hook.
+test("a review gate set by a command reaches the stop hook despite another plugin's CLAUDE_PLUGIN_DATA", () => {
+  const workspace = makeTempDir();
+  const ownDataDir = makeTempDir();
+  const otherDataDir = makeTempDir();
+  const commandEnv = { OPENCODE_COMPANION_PLUGIN_DATA: ownDataDir, CLAUDE_PLUGIN_DATA: otherDataDir };
+  const hookEnv = { OPENCODE_COMPANION_PLUGIN_DATA: null, CLAUDE_PLUGIN_DATA: ownDataDir };
+
+  withEnv(commandEnv, () => setConfig(workspace, "stopReviewGate", true));
+  assert.equal(withEnv(hookEnv, () => getConfig(workspace).stopReviewGate), true);
+
+  withEnv(commandEnv, () => setConfig(workspace, "stopReviewGate", false));
+  assert.equal(withEnv(hookEnv, () => getConfig(workspace).stopReviewGate), false);
+  assert.equal(fs.existsSync(path.join(otherDataDir, "state")), false);
 });
 
 test("saveState prunes dropped job artifacts when indexed jobs exceed the cap", () => {

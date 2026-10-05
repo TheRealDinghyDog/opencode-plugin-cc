@@ -12,7 +12,7 @@ import {
   loadServerSession,
   teardownServerSession
 } from "./lib/server-lifecycle.mjs";
-import { resolveStateFile, updateStateAsync } from "./lib/state.mjs";
+import { COMPANION_PLUGIN_DATA_ENV, resolveStateFile, updateStateAsync } from "./lib/state.mjs";
 import { TRANSCRIPT_PATH_ENV } from "./lib/claude-session-transfer.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 
@@ -81,7 +81,11 @@ async function cleanupSessionJobs(cwd, sessionId) {
 function handleSessionStart(input) {
   appendEnvVar(SESSION_ID_ENV, input.session_id);
   appendEnvVar(TRANSCRIPT_PATH_ENV, input.transcript_path);
-  appendEnvVar(PLUGIN_DATA_ENV, process.env[PLUGIN_DATA_ENV]);
+  // Claude Code gives each plugin's hooks that plugin's own CLAUDE_PLUGIN_DATA.
+  // Re-export it under a name no other plugin writes, so the commands Claude
+  // runs this session use our directory even when another plugin exports
+  // CLAUDE_PLUGIN_DATA to the shared env file.
+  appendEnvVar(COMPANION_PLUGIN_DATA_ENV, process.env[PLUGIN_DATA_ENV]);
 }
 
 async function handleSessionEnd(input) {

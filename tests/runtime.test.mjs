@@ -1640,3 +1640,22 @@ test("an external server bypasses the local OpenCode 2.x CLI gate", async () => 
     }
   );
 });
+
+test("SessionStart exports this plugin's data directory under its own name, not CLAUDE_PLUGIN_DATA", () => {
+  const envFile = path.join(makeTempDir(), "claude-env");
+  fs.writeFileSync(envFile, "", "utf8");
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+
+  const result = run("node", [SESSION_HOOK, "SessionStart"], {
+    env: { ...process.env, CLAUDE_ENV_FILE: envFile, CLAUDE_PLUGIN_DATA: pluginDataDir },
+    input: JSON.stringify({ session_id: "sess-start", transcript_path: path.join(pluginDataDir, "t.jsonl") })
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const exported = fs.readFileSync(envFile, "utf8");
+  assert.ok(exported.includes(`export OPENCODE_COMPANION_PLUGIN_DATA='${pluginDataDir}'\n`), exported);
+  assert.ok(exported.includes("export OPENCODE_COMPANION_SESSION_ID='sess-start'\n"), exported);
+  // Other plugins' hooks write CLAUDE_PLUGIN_DATA to the same file; this hook
+  // must not overwrite theirs.
+  assert.doesNotMatch(exported, /^export CLAUDE_PLUGIN_DATA=/m);
+});
