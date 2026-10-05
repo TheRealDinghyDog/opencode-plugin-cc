@@ -8,9 +8,12 @@
 //   success (default)  one step that answers with text
 //   provider-error     session.execution.failed before any step
 //   permission         a write outside the workspace asks external_directory
-//   form               the question tool opens a form and waits for it
+//   form               the question tool opens a form and waits for it (on
+//                      the server's first prompt; later prompts answer)
 //   subagent           a child session runs and answers before the parent
 //   slow               streams text until interrupted (or 30s pass)
+//   late-reminder      answers, then a plan-mode reminder is delivered in
+//                      the same execution and answered too (a real race)
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -207,12 +210,12 @@ function startServer(args) {
     });
   }
 
-  function stepEnded(sessionID, assistantMessageID, files = []) {
+  function stepEnded(sessionID, assistantMessageID, files = [], finish = "stop") {
     emit("session.step.ended", {
       sessionID,
       assistantMessageID,
-      finish: "stop",
-      rawFinish: "stop",
+      finish,
+      rawFinish: finish === "stop" ? "stop" : "tool_calls",
       cost: 0,
       tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
       snapshot: "fake-snapshot",
@@ -243,16 +246,18 @@ function startServer(args) {
     finish(sessionID, "interrupted", { reason });
   }
 
-  async function runTurn(session, prompt) {
+  async function runTurn(session, prompt, inboxID) {
     const sessionID = session.id;
     const agent = session.agent;
-    const scenario = process.env.FAKE_OPENCODE_V2_SCENARIO || "success";
+    const promptIndex = loadState().prompts.length - 1;
+    const configured = process.env.FAKE_OPENCODE_V2_SCENARIO || "success";
+    const scenario = configured === "form" && promptIndex > 0 ? "success" : configured;
     const reply = process.env.FAKE_OPENCODE_V2_REPLY_TEXT || DEFAULT_REPLY;
     const turn = { interrupted: false, waiters: new Map() };
     turns.set(sessionID, turn);
 
-    const inboxID = id("msg");
     emit("session.execution.started", { sessionID });
+    emit("session.inbox.delivered", { sessionID, inboxID });
     messages.get(sessionID).push({ id: inboxID, type: "user", time: { created: Date.now() }, text: prompt });
 
     if (scenario === "provider-error") {
@@ -383,7 +388,7 @@ function startServer(args) {
         });
       }
 
-      stepEnded(sessionID, first);
+      stepEnded(sessionID, first, [], "tool-calls");
       recordAssistant(sessionID, first, "", agent);
       const second = id("msg");
       step(sessionID, agent, second);
@@ -397,6 +402,21 @@ function startServer(args) {
     text(sessionID, first, reply);
     stepEnded(sessionID, first);
     recordAssistant(sessionID, first, reply, agent);
+    if (scenario === "late-reminder") {
+      const reminderID = id("msg");
+      emit("session.inbox.delivered", { sessionID, inboxID: reminderID });
+      messages.get(sessionID).push({
+        id: reminderID,
+        type: "synthetic",
+        time: { created: Date.now() },
+        text: "<system-reminder>\nYou are in Plan mode.\n</system-reminder>"
+      });
+      const reminderReply = id("msg");
+      step(sessionID, agent, reminderReply);
+      text(sessionID, reminderReply, "I'm ready to help. What would you like to plan?");
+      stepEnded(sessionID, reminderReply);
+      recordAssistant(sessionID, reminderReply, "I'm ready to help. What would you like to plan?", agent);
+    }
     finish(sessionID, "succeeded");
   }
 
@@ -436,6 +456,22 @@ function startServer(args) {
         sendJson(res, {
           data: [{ ...MODEL, modelID: MODEL.id, variants: [{ id: "none" }, { id: "low" }, { id: "high" }] }]
         })
+    ],
+    ["GET", /^\/api\/model\/default$/, (req, res) => sendJson(res, { data: { ...MODEL, modelID: MODEL.id } })],
+    [
+      "POST",
+      /^\/api\/session\/([^/]+)\/model$/,
+      async (req, res, [sessionID]) => {
+        const body = await readJson(req);
+        const session = sessions.get(sessionID);
+        if (session) {
+          session.model = body.model;
+        }
+        updateState((state) => {
+          state.modelChanges = [...(state.modelChanges ?? []), { sessionID, model: body.model }];
+        });
+        sendJson(res, { data: session ?? null });
+      }
     ],
     ["GET", /^\/api\/provider$/, (req, res) => sendJson(res, { data: [{ id: "fake", name: "Fake" }] })],
     ["GET", /^\/api\/credential$/, (req, res) => sendJson(res, { data: [{ id: "cred_fake", integrationID: "fake", active: true }] })],
@@ -480,7 +516,7 @@ function startServer(args) {
         });
         const inbox = { id: id("msg"), sessionID, time: { created: Date.now() }, type: "user", payload: { text: body.text }, delivery: "steer" };
         sendJson(res, { data: inbox });
-        setTimeout(() => runTurn(session, body.text), 10);
+        setTimeout(() => runTurn(session, body.text, inbox.id), 10);
       }
     ],
     [

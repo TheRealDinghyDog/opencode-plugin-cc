@@ -255,7 +255,8 @@ export async function runTrackedJob(job, runner, options = {}) {
         turnId: execution.turnId ?? null,
         serverUrl,
         summary: execution.summary,
-        phase: completionStatus === "completed" ? "done" : "failed",
+        // A 2.x run that stopped on a question waits for an answer by resume.
+        phase: completionStatus === "completed" ? "done" : execution.awaitingAnswer ? "awaiting-answer" : "failed",
         pid: null,
         completedAt
       };

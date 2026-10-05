@@ -11,10 +11,12 @@ import {
   unsupportedOpencodeVersionMessage
 } from "./opencode-server.mjs";
 import { OPENCODE_V2_MAJOR, OpencodeV2Client } from "./opencode-server-v2.mjs";
+import { captureV2Turn } from "./turn-capture-v2.mjs";
 import {
   SERVER_PASSWORD_ENV,
   SERVER_URL_ENV,
   SERVER_USERNAME_ENV,
+  detectServerApi,
   ensureServer,
   loadServerSession,
   serverSessionCredentials
@@ -1166,10 +1168,14 @@ function resolveCredentialsForServerUrl(cwd, serverUrl) {
 }
 
 async function abortSessionAtUrl(serverUrl, threadId, timeoutMs = 1000, credentials = {}, directory = null) {
+  // A job record keeps only the server URL, so ask the server which API it
+  // speaks (2.x interrupts instead of aborting).
+  const api = await detectServerApi(serverUrl, timeoutMs, credentials);
+  const Client = api === OPENCODE_V2_MAJOR ? OpencodeV2Client : OpencodeServerClient;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const client = new OpencodeServerClient(serverUrl, {
+    const client = new Client(serverUrl, {
       ...credentials,
       ...(directory ? { directory } : {})
     });
@@ -1202,11 +1208,17 @@ function sessionTitle(session) {
 }
 
 function sessionDirectory(session) {
-  return session?.directory ?? session?.cwd ?? session?.path ?? "";
+  return session?.directory ?? session?.location?.directory ?? session?.cwd ?? session?.path ?? "";
 }
 
+// Both APIs report `time.updated` in epoch milliseconds; Date.parse() of a
+// number is NaN, which used to make every session tie.
 function sessionUpdatedAt(session) {
-  return Date.parse(session?.updatedAt ?? session?.updated_at ?? session?.time?.updated ?? "") || 0;
+  const value = session?.updatedAt ?? session?.updated_at ?? session?.time?.updated ?? null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return Date.parse(value ?? "") || 0;
 }
 
 function buildAuthStatus(fields = {}) {
@@ -1456,6 +1468,120 @@ export async function interruptServerTurn(cwd, { threadId, serverUrl = null, ser
   }
 }
 
+// OpenCode 2.x selects the model per session as {providerID, id, variant}.
+// Variants are defined per model, so --effort is checked against that
+// model's own list instead of being sent blindly (an unknown variant fails
+// the turn with provider.no-route).
+async function resolveV2ModelRef(client, model, effort) {
+  let target = normalizeModelSelection(model);
+  if (!target && !effort) {
+    return null;
+  }
+  if (!target) {
+    const fallback = await client.defaultModel();
+    if (!fallback?.providerID) {
+      throw new Error("OpenCode 2.x needs a model for --effort; pass --model provider/model as well.");
+    }
+    target = { providerID: fallback.providerID, modelID: fallback.id ?? fallback.modelID };
+  }
+  const models = await client.listModels();
+  const match = models.find(
+    (candidate) =>
+      candidate?.providerID === target.providerID && (candidate.id === target.modelID || candidate.modelID === target.modelID)
+  );
+  if (!match) {
+    throw new Error(
+      `OpenCode has no model ${target.providerID}/${target.modelID}. Run \`opencode models\` to list the available ones.`
+    );
+  }
+  if (effort) {
+    const variants = (Array.isArray(match.variants) ? match.variants : []).map((variant) => variant?.id).filter(Boolean);
+    if (!variants.includes(effort)) {
+      throw new Error(
+        `OpenCode 2.x model ${target.providerID}/${target.modelID} has no "${effort}" effort. Available: ${variants.join(", ") || "none"}.`
+      );
+    }
+  }
+  return { providerID: target.providerID, id: match.id ?? target.modelID, ...(effort ? { variant: effort } : {}) };
+}
+
+async function runV2Turn(cwd, client, server, options) {
+  const model = await resolveV2ModelRef(client, options.model, options.variant ?? options.effort ?? null);
+  let sessionID = options.resumeThreadId ?? options.resumeSessionId ?? null;
+  let createdSessionID = null;
+
+  if (sessionID) {
+    emitProgress(options.onProgress, `Resuming OpenCode session ${sessionID}.`, "starting", {
+      threadId: sessionID,
+      serverUrl: server.url
+    });
+    if (model) {
+      await client.setModel(sessionID, model);
+    }
+  } else {
+    emitProgress(options.onProgress, "Starting OpenCode task session.", "starting", { serverUrl: server.url });
+    const rawTitle =
+      options.threadName ?? options.title ?? (options.taskSessionTitle ? buildTaskSessionName(options.prompt) : null);
+    // As on 1.x (issue #26): no session permission rules. The stock agents'
+    // guards stay in force and every ask is rejected headlessly.
+    const session = await client.createSession({
+      title: typeof rawTitle === "string" && rawTitle.trim() ? rawTitle : undefined,
+      agent: options.agent,
+      model: model ?? undefined,
+      directory: canonicalWorkspaceDirectory(cwd)
+    });
+    sessionID = session?.id ?? null;
+    if (!sessionID) {
+      throw new Error("OpenCode did not return a session id.");
+    }
+    createdSessionID = sessionID;
+    emitProgress(options.onProgress, `Session ready (${sessionID}).`, "starting", {
+      threadId: sessionID,
+      serverUrl: server.url
+    });
+  }
+
+  let turnState;
+  try {
+    turnState = await captureV2Turn(client, sessionID, options.prompt, {
+      onProgress: options.onProgress,
+      turnTimeoutMs: options.turnTimeoutMs,
+      eventOpenTimeoutMs: options.eventOpenTimeoutMs,
+      streamDropPollIntervalMs: options.streamDropPollIntervalMs,
+      recoveryTimeoutMs: options.recoveryTimeoutMs
+    });
+  } catch (error) {
+    if (createdSessionID) {
+      try {
+        await client.deleteSession(createdSessionID);
+      } catch {
+        // Preserve the turn failure; session deletion is best-effort cleanup.
+      }
+    }
+    throw error;
+  }
+
+  return {
+    status: turnState.error ? 1 : 0,
+    threadId: sessionID,
+    turnId: turnState.messageID,
+    serverUrl: server.url,
+    finalMessage: turnState.finalMessage,
+    structuredOutput: null,
+    reasoningSummary: turnState.reasoningSummary,
+    turn: {
+      id: turnState.messageID ?? "opencode-message",
+      status: turnState.error ? "failed" : "completed"
+    },
+    error: turnState.error,
+    stderr: "",
+    fileChanges: [],
+    touchedFiles: [...turnState.touchedFiles],
+    commandExecutions: turnState.commandExecutions,
+    question: turnState.question ?? null
+  };
+}
+
 export async function runServerTurn(cwd, options = {}) {
   const availability = getAvailability(cwd);
   if (!availability.available) {
@@ -1476,6 +1602,10 @@ export async function runServerTurn(cwd, options = {}) {
       // server is plugin-owned without consulting its own environment.
       serverExternal: Boolean(server.external)
     });
+
+    if (server.api === OPENCODE_V2_MAJOR) {
+      return runV2Turn(cwd, client, server, { ...options, prompt, write, agent });
+    }
 
     let sessionID = options.resumeThreadId ?? options.resumeSessionId ?? null;
     let createdSessionID = null;
@@ -1601,7 +1731,7 @@ export async function findLatestTaskThread(cwd) {
   const canonicalCwd = canonicalWorkspaceDirectory(cwd);
   return withServer(cwd, async (client) => {
     const sessions = getSessionsArray(await client.listSessions())
-      .filter((session) => sessionTitle(session).startsWith(TASK_SESSION_PREFIX))
+      .filter((session) => sessionTitle(session).startsWith(TASK_SESSION_PREFIX) && !session?.parentID)
       .filter((session) => {
         const directory = sessionDirectory(session);
         return !directory || directory === canonicalCwd;

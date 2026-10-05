@@ -6,12 +6,14 @@
     { "method": "GET", "path": "/api/event" },
     { "method": "GET", "path": "/api/agent" },
     { "method": "GET", "path": "/api/model" },
+    { "method": "GET", "path": "/api/model/default" },
     { "method": "GET", "path": "/api/provider" },
     { "method": "GET", "path": "/api/credential" },
     { "method": "GET", "path": "/api/session" },
     { "method": "POST", "path": "/api/session" },
     { "method": "DELETE", "path": "/api/session/{sessionID}" },
     { "method": "POST", "path": "/api/session/{sessionID}/prompt" },
+    { "method": "POST", "path": "/api/session/{sessionID}/model" },
     { "method": "GET", "path": "/api/session/{sessionID}/message" },
     { "method": "POST", "path": "/api/session/{sessionID}/interrupt" },
     { "method": "GET", "path": "/api/session/{sessionID}/permission" },
@@ -23,6 +25,7 @@
   "requests": {
     "POST /api/session": { "sends": ["title", "agent", "model", "location"] },
     "POST /api/session/{sessionID}/prompt": { "sends": ["text"] },
+    "POST /api/session/{sessionID}/model": { "sends": ["model"] },
     "POST /api/session/{sessionID}/permission/{requestID}/reply": { "sends": ["decision", "message"] },
     "POST /api/experimental/session/import": { "sends": ["info", "messages", "location"] }
   },
@@ -34,6 +37,7 @@
       "optional": ["parentID", "title", "model"]
     },
     "session.execution.started": { "required": ["sessionID"] },
+    "session.inbox.delivered": { "required": ["sessionID", "inboxID"] },
     "session.execution.succeeded": { "required": ["sessionID"] },
     "session.execution.failed": { "required": ["sessionID", "error"], "nested": { "error": ["type", "message"] } },
     "session.execution.interrupted": { "required": ["sessionID", "reason"] },

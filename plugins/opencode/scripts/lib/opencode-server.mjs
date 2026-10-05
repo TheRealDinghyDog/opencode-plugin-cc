@@ -49,6 +49,24 @@ export function unsupportedOpencodeVersionError(version) {
   return error;
 }
 
+// fetch() reports every network failure as just "fetch failed"; its cause
+// says what happened (refused, reset, timed out). Keep it in the message, and
+// keep the error a plain transport error: callers treat those differently
+// from HTTP rejections. Aborts pass through unchanged.
+export async function fetchWithCause(fetchImpl, url, init, label) {
+  try {
+    return await fetchImpl(url, init);
+  } catch (error) {
+    const detail = error?.cause?.code ?? error?.cause?.message ?? null;
+    if (error?.name === "AbortError" || init?.signal?.aborted || !detail || String(error?.message).includes(detail)) {
+      throw error;
+    }
+    const wrapped = new Error(`OpenCode ${label} failed: ${error.message} (${detail})`, { cause: error });
+    wrapped.code = error.cause?.code ?? null;
+    throw wrapped;
+  }
+}
+
 function trimBaseUrl(url) {
   return String(url ?? "").replace(/\/+$/, "");
 }
@@ -309,12 +327,17 @@ export class OpencodeServerClient {
       ...this.authHeaders(),
       ...(options.headers ?? {})
     };
-    const response = await this.fetch(url, {
-      method,
-      headers,
-      body: options.body == null ? undefined : JSON.stringify(options.body),
-      signal: options.signal
-    });
+    const response = await fetchWithCause(
+      this.fetch,
+      url,
+      {
+        method,
+        headers,
+        body: options.body == null ? undefined : JSON.stringify(options.body),
+        signal: options.signal
+      },
+      `${method} ${path}`
+    );
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");

@@ -15,6 +15,7 @@ import {
   buildBasicAuthHeader,
   consumeEventStream,
   encodePathSegment,
+  fetchWithCause,
   parseOpencodeVersionInfo,
   requestWithFreshConnection,
   unsupportedOpencodeVersionError
@@ -83,16 +84,21 @@ export class OpencodeV2Client {
       return result;
     }
 
-    const response = await this.fetch(url, {
-      method,
-      headers: {
-        ...(options.body === undefined ? {} : { "content-type": "application/json" }),
-        ...this.authHeaders(),
-        ...(options.headers ?? {})
+    const response = await fetchWithCause(
+      this.fetch,
+      url,
+      {
+        method,
+        headers: {
+          ...(options.body === undefined ? {} : { "content-type": "application/json" }),
+          ...this.authHeaders(),
+          ...(options.headers ?? {})
+        },
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: options.signal
       },
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      signal: options.signal
-    });
+      `${method} ${path}`
+    );
     const text = await response.text().catch(() => "");
     if (!response.ok) {
       throw new OpencodeHttpError(`OpenCode ${method} ${path} failed with HTTP ${response.status}.`, {
@@ -160,6 +166,18 @@ export class OpencodeV2Client {
     return this.request("POST", `/api/session/${encodePathSegment(sessionID)}/interrupt`, { signal: options.signal });
   }
 
+  // Cancel paths call abort() on either client; 2.x's equivalent is interrupt.
+  abort(sessionID, options = {}) {
+    return this.interrupt(sessionID, options);
+  }
+
+  setModel(sessionID, model, options = {}) {
+    return this.request("POST", `/api/session/${encodePathSegment(sessionID)}/model`, {
+      body: { model },
+      signal: options.signal
+    });
+  }
+
   deleteSession(sessionID, options = {}) {
     return this.request("DELETE", `/api/session/${encodePathSegment(sessionID)}`, { signal: options.signal });
   }
@@ -195,6 +213,11 @@ export class OpencodeV2Client {
   async listModels(options = {}) {
     const result = await this.request("GET", "/api/model", { location: true, signal: options.signal });
     return result?.data ?? [];
+  }
+
+  async defaultModel(options = {}) {
+    const result = await this.request("GET", "/api/model/default", { location: true, signal: options.signal });
+    return result?.data ?? null;
   }
 
   async listAgents(options = {}) {
