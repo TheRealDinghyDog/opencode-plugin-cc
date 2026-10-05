@@ -556,11 +556,12 @@ function startServer(args) {
   ];
 
   const server = http.createServer(async (req, res) => {
-    if (expectedAuthorization && req.headers.authorization !== expectedAuthorization) {
+    const url = new URL(req.url, "http://127.0.0.1");
+    // Like 2.0.20: only /api/* requires auth; the web UI fallback does not.
+    if (expectedAuthorization && url.pathname.startsWith("/api/") && req.headers.authorization !== expectedAuthorization) {
       sendJson(res, { _tag: "UnauthorizedError", message: "Unauthorized" }, 401);
       return;
     }
-    const url = new URL(req.url, "http://127.0.0.1");
     for (const [method, pattern, handler] of routes) {
       const match = req.method === method ? pattern.exec(url.pathname) : null;
       if (match) {
