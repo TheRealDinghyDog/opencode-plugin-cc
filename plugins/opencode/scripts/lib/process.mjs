@@ -2,8 +2,34 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 
+// Node's own test for cmd.exe; `shell: true` also means cmd.exe on Windows.
+const CMD_SHELL = /^(?:.*\\)?cmd(?:\.exe)?$/i;
+const CMD_SPECIAL = /[\s"&|<>^()]/;
+const POSIX_SAFE = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+// With a shell, Node joins the arguments into one command line without
+// quoting them (issue #81): cmd.exe splits an argument at its spaces, and Git
+// Bash (when SHELL points to it) also drops the backslashes of a Windows path
+// (C:\Users\me -> C:Usersme). Quote each argument for the shell that reads it.
+export function quoteWindowsShellArgs(args, shell) {
+  const cmd = shell === true || (typeof shell === "string" && CMD_SHELL.test(shell));
+  return args.map((arg) => {
+    const value = String(arg);
+    if (cmd) {
+      if (value !== "" && !CMD_SPECIAL.test(value)) {
+        return value;
+      }
+      // The program splits its command line by the usual Windows rules: a
+      // quote is escaped with a backslash, and backslashes before a quote
+      // (including the closing one) are doubled.
+      return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
+    }
+    return POSIX_SAFE.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
+  });
+}
+
 function spawnCommand(command, args, options, shell) {
-  const result = spawnSync(command, args, {
+  const result = spawnSync(command, shell ? quoteWindowsShellArgs(args, shell) : args, {
     cwd: options.cwd,
     env: options.env,
     encoding: "utf8",

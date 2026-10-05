@@ -1,9 +1,13 @@
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
   findListeningPid,
+  quoteWindowsShellArgs,
   readProcessCommandLine,
+  runCommand,
   runExecutable,
   terminateProcessTree,
   terminateTaskWorkerProcessTree
@@ -192,6 +196,71 @@ test("terminateProcessTree still fails when taskkill fails and the target lives 
       }),
     /taskkill \/PID 1234 \/T \/F: exit=1: ERROR: .*Access is denied/s
   );
+});
+
+// Issue #81: Node joins shell arguments unquoted.
+const TRICKY_ARGS = ["plain-1.0", "C:\\Users\\Jane Doe\\x.json", "C:\\Program Files\\", "it's", "", "HEAD^", "a&b|c<d>e"];
+const PRINT_ARGV = "process.stdout.write(JSON.stringify(process.argv.slice(1)))";
+
+test("quoteWindowsShellArgs quotes for cmd.exe only where cmd would split or interpret", () => {
+  const cmd = "C:\\Windows\\System32\\cmd.exe";
+  assert.deepEqual(quoteWindowsShellArgs(["plain", "--format=%H", "C:\\a b\\c.json", "HEAD^", "", 'say "hi"'], cmd), [
+    "plain",
+    "--format=%H",
+    '"C:\\a b\\c.json"',
+    '"HEAD^"',
+    '""',
+    '"say \\"hi\\""'
+  ]);
+  assert.deepEqual(quoteWindowsShellArgs(["C:\\a b"], true), ['"C:\\a b"']);
+  // Backslashes before the closing quote are doubled, or they would escape it.
+  assert.deepEqual(quoteWindowsShellArgs(["C:\\Program Files\\", 'a\\"b c'], true), [
+    '"C:\\Program Files\\\\"',
+    '"a\\\\\\"b c"'
+  ]);
+});
+
+test("quoteWindowsShellArgs single-quotes anything Git Bash would reinterpret", () => {
+  const bash = "C:\\Program Files\\Git\\usr\\bin\\bash.exe";
+  assert.deepEqual(quoteWindowsShellArgs(["plain-1.0", "C:\\Users\\me\\x.json", "it's", ""], bash), [
+    "plain-1.0",
+    "'C:\\Users\\me\\x.json'",
+    "'it'\\''s'",
+    "''"
+  ]);
+});
+
+const BASH = ["/bin/bash", "C:\\Program Files\\Git\\bin\\bash.exe"].find((candidate) => fs.existsSync(candidate));
+
+test("Git Bash-quoted arguments survive bash -c intact", { skip: BASH ? false : "no bash here" }, () => {
+  const line = ["node", ...quoteWindowsShellArgs(["-e", PRINT_ARGV, ...TRICKY_ARGS], BASH)].join(" ");
+  const result = spawnSync(BASH, ["-c", line], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), TRICKY_ARGS);
+});
+
+test("runCommand passes arguments intact through cmd.exe and Git Bash on Windows", {
+  skip: process.platform === "win32" ? false : "Windows only"
+}, () => {
+  const original = process.env.SHELL;
+  try {
+    for (const shell of [undefined, BASH].filter((value, index) => index === 0 || value)) {
+      if (shell) {
+        process.env.SHELL = shell;
+      } else {
+        delete process.env.SHELL;
+      }
+      const result = runCommand("node", ["-e", PRINT_ARGV, ...TRICKY_ARGS]);
+      assert.equal(result.status, 0, `${shell ?? "cmd.exe"}: ${result.stderr}`);
+      assert.deepEqual(JSON.parse(result.stdout), TRICKY_ARGS, shell ?? "cmd.exe");
+    }
+  } finally {
+    if (original === undefined) {
+      delete process.env.SHELL;
+    } else {
+      process.env.SHELL = original;
+    }
+  }
 });
 
 test("runExecutable passes arguments through intact, with no shell to reinterpret them (issue #65)", () => {
