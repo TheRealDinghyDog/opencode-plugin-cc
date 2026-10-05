@@ -19,6 +19,9 @@
 //
 // The reply text is FAKE_OPENCODE_V2_REPLY_TEXT, or the Nth entry of the
 // JSON array FAKE_OPENCODE_V2_REPLY_SEQUENCE for the server's Nth prompt.
+//
+// FAKE_OPENCODE_V2_IGNORE_INTERRUPT=1 records interrupts without stopping the
+// turn, so a cancelled worker is still running when cancel ends it (#77).
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -279,7 +282,7 @@ function startServer(args) {
 
     if (scenario === "slow") {
       emit("session.text.started", { sessionID, assistantMessageID: first, ordinal: 0 });
-      const deadline = Date.now() + 30000;
+      const deadline = Date.now() + (process.env.FAKE_OPENCODE_V2_IGNORE_INTERRUPT === "1" ? 90000 : 30000);
       while (!turn.interrupted && Date.now() < deadline) {
         emit("session.text.delta", { sessionID, assistantMessageID: first, ordinal: 0, delta: "counting... " });
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -546,7 +549,7 @@ function startServer(args) {
         updateState((state) => {
           state.interrupts.push(sessionID);
         });
-        if (turn) {
+        if (turn && process.env.FAKE_OPENCODE_V2_IGNORE_INTERRUPT !== "1") {
           turn.interrupted = true;
         }
         sendJson(res, { interrupted: Boolean(turn) });
