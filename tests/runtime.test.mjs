@@ -189,7 +189,7 @@ test("interruptServerTurn marks env-provided server urls as external", async () 
     const url = new URL(String(requestUrl));
     calls.push({ method: options.method ?? "GET", pathname: url.pathname });
     if (url.pathname === "/global/health") {
-      return jsonResponse({ ok: true });
+      return jsonResponse({ healthy: true, version: "1.17.15" });
     }
     if (url.pathname === "/session/ses_external/abort") {
       return jsonResponse({ ok: true });
@@ -596,7 +596,7 @@ globalThis.fetch = async (requestUrl, options = {}) => {
   const method = options.method ?? "GET";
   fs.appendFileSync(logFile, JSON.stringify({ method, pathname: url.pathname }) + "\\n", "utf8");
   if (method === "GET" && url.pathname === "/global/health") {
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ healthy: true, version: "1.17.15" }), {
       status: 200,
       headers: { "content-type": "application/json" }
     });
@@ -691,7 +691,7 @@ function installFailingCaptureFetch(createdSessionId = "ses_created") {
     calls.push({ method, pathname: url.pathname });
 
     if (method === "GET" && url.pathname === "/global/health") {
-      return jsonResponse({ ok: true });
+      return jsonResponse({ healthy: true, version: "1.17.15" });
     }
     if (method === "POST" && url.pathname === "/session") {
       return jsonResponse({ id: createdSessionId });
@@ -1508,4 +1508,135 @@ test("setup reports loggedIn false when /provider endpoint fails", { skip: LOCAL
   } finally {
     cleanupServer(repo, env);
   }
+});
+
+function initCommittedRepo(repo) {
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "before\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+}
+
+for (const userPartFirst of [false, true]) {
+  test(
+    `a provider error is reported instead of the echoed prompt${userPartFirst ? " (prompt part before its role)" : ""}`,
+    { skip: LOCAL_LISTEN_SKIP },
+    () => {
+      const repo = makeTempDir();
+      const binDir = makeTempDir();
+      installFakeOpencode(binDir);
+      initCommittedRepo(repo);
+      const env = buildTestEnv(binDir, {
+        FAKE_OPENCODE_MESSAGE_FAIL: "provider-error",
+        ...(userPartFirst ? { FAKE_OPENCODE_USER_PART_FIRST: "1" } : {})
+      });
+
+      try {
+        const rendered = run("node", [SCRIPT, "task", "summarize the secret plan"], { cwd: repo, env });
+        assert.match(rendered.stdout, /OpenCode error: Bad Request: fake-model is not supported/);
+        assert.doesNotMatch(rendered.stdout, /summarize the secret plan/);
+        assert.doesNotMatch(rendered.stderr, /Assistant message captured: summarize the secret plan/);
+
+        const json = run("node", [SCRIPT, "task", "--json", "summarize the secret plan"], { cwd: repo, env });
+        const payload = JSON.parse(json.stdout);
+        assert.equal(payload.status, 1);
+        assert.equal(payload.rawOutput, "");
+      } finally {
+        cleanupServer(repo, env);
+      }
+    }
+  );
+}
+
+test("a provider error after partial output keeps the output and reports the error", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initCommittedRepo(repo);
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "provider-error-after-text" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "summarize the secret plan"], { cwd: repo, env });
+    assert.match(result.stdout, /Partial answer before the failure\./);
+    assert.match(result.stdout, /OpenCode error: Bad Request: fake-model is not supported/);
+    assert.doesNotMatch(result.stdout, /summarize the secret plan/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("a review whose provider fails reports the error, not the review prompt", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initCommittedRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "after\n");
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_MESSAGE_FAIL: "provider-error" });
+
+  try {
+    const result = run("node", [SCRIPT, "review"], { cwd: repo, env });
+    assert.match(result.stdout, /OpenCode failed before returning a review\./);
+    assert.match(result.stdout, /- Error: Bad Request: fake-model is not supported/);
+    assert.doesNotMatch(result.stdout, /Raw final message/);
+    assert.doesNotMatch(result.stdout, /<role>/);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("setup rejects an OpenCode 2.x CLI without starting a server", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20" });
+
+  try {
+    const result = run("node", [SCRIPT, "setup", "--json"], { cwd: repo, env });
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.ready, false);
+    assert.equal(payload.opencode.available, false);
+    assert.equal(payload.opencode.unsupported, true);
+    assert.equal(payload.opencode.version, "2.0.20");
+    assert.match(payload.opencode.detail, /OpenCode 2\.0\.20 is not supported yet/);
+    assert.match(payload.opencode.detail, /npm install -g opencode-ai/);
+    assert.ok(payload.nextSteps.some((step) => /not supported yet/.test(step)));
+    assert.equal(readServerBootCount(binDir), 0);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("a task on an OpenCode 2.x CLI fails with the unsupported-version message", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initCommittedRepo(repo);
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20" });
+
+  try {
+    const result = run("node", [SCRIPT, "task", "check the fixture"], { cwd: repo, env });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}\n${result.stderr}`, /OpenCode 2\.0\.20 is not supported yet/);
+    assert.equal(readServerBootCount(binDir), 0);
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+test("an external server bypasses the local OpenCode 2.x CLI gate", async () => {
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  const workspace = makeTempDir();
+  await withProcessEnv(
+    { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`, FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20" },
+    async () => {
+      const { getOpencodeAvailability } = await import("../plugins/opencode/scripts/lib/opencode.mjs");
+      const local = getOpencodeAvailability(workspace, {});
+      assert.equal(local.available, false);
+      assert.equal(local.unsupported, true);
+      const external = getOpencodeAvailability(workspace, { [SERVER_URL_ENV]: "http://127.0.0.1:1" });
+      assert.equal(external.available, true);
+    }
+  );
 });

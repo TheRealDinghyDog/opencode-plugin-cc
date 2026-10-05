@@ -210,12 +210,14 @@ export function renderSetupReport(report) {
 
 export function renderReviewResult(parsedResult, meta) {
   if (!parsedResult.parsed) {
+    const failureMessage = String(parsedResult.failureMessage ?? "").trim();
+    const failed = Boolean(parsedResult.status) && failureMessage;
     const lines = [
       `# OpenCode ${meta.reviewLabel}`,
       "",
-      "OpenCode did not return valid structured JSON.",
+      failed ? "OpenCode failed before returning a review." : "OpenCode did not return valid structured JSON.",
       "",
-      `- Parse error: ${parsedResult.parseError}`
+      failed ? `- Error: ${failureMessage}` : `- Parse error: ${parsedResult.parseError}`
     ];
 
     if (parsedResult.rawOutput) {
@@ -314,11 +316,18 @@ export function renderNativeReviewResult(result, meta) {
 
 export function renderTaskResult(parsedResult, meta) {
   const rawOutput = typeof parsedResult?.rawOutput === "string" ? parsedResult.rawOutput : "";
+  const failureMessage = String(parsedResult?.failureMessage ?? "").trim();
+  // A failed turn must surface its error, even after partial output.
+  if (parsedResult?.failed && failureMessage) {
+    return rawOutput.trim()
+      ? `${rawOutput.trimEnd()}\n\nOpenCode error: ${failureMessage}\n`
+      : `OpenCode error: ${failureMessage}\n`;
+  }
   if (rawOutput) {
     return rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
   }
 
-  const message = String(parsedResult?.failureMessage ?? "").trim() || "OpenCode did not return a final message.";
+  const message = failureMessage || "OpenCode did not return a final message.";
   return `${message}\n`;
 }
 
@@ -398,9 +407,11 @@ export function renderStoredJobResult(job, storedJob) {
     return `${output}\nOpenCode session ID: ${threadId}\nResume in OpenCode: ${resumeCommand}\n`;
   }
 
+  // A failed task's rendered output carries its error; raw output alone hides it.
+  const failedTask = Boolean(storedJob?.result?.status) && typeof storedJob?.rendered === "string" && storedJob.rendered;
   const rawOutput =
-    (typeof storedJob?.result?.rawOutput === "string" && storedJob.result.rawOutput) ||
-    (typeof storedJob?.result?.opencode?.stdout === "string" && storedJob.result.opencode.stdout) ||
+    (!failedTask && typeof storedJob?.result?.rawOutput === "string" && storedJob.result.rawOutput) ||
+    (!failedTask && typeof storedJob?.result?.opencode?.stdout === "string" && storedJob.result.opencode.stdout) ||
     "";
   if (rawOutput) {
     const output = rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;

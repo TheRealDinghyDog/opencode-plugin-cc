@@ -3,7 +3,13 @@ import path from "node:path";
 
 import { buildOpenCodeImportDocumentFromClaudeJsonl } from "./claude-session-transfer.mjs";
 import { createTempDir, readJsonFile, writeJsonFile } from "./fs.mjs";
-import { OpencodeHttpError, OpencodeServerClient } from "./opencode-server.mjs";
+import {
+  OpencodeHttpError,
+  OpencodeServerClient,
+  SUPPORTED_OPENCODE_MAJOR,
+  parseOpencodeVersionInfo,
+  unsupportedOpencodeVersionMessage
+} from "./opencode-server.mjs";
 import {
   SERVER_PASSWORD_ENV,
   SERVER_URL_ENV,
@@ -381,6 +387,12 @@ function createTurnCaptureState(sessionID, options = {}) {
     priorAssistantSnapshotError: null,
     resumed: Boolean(options.resumed),
     finalMessage: "",
+    // Message the streamed finalMessage was assembled from.
+    finalMessageID: null,
+    // Main-session message id -> role, from message.updated. The server
+    // streams the user's prompt as a text part too, so text assembly must
+    // skip it or a failed turn reports the prompt as its answer.
+    messageRoles: new Map(),
     structuredOutput: null,
     reasoningSummary: [],
     // Latest snapshot of every streamed part, keyed by part id. Insertion
@@ -519,6 +531,11 @@ function partIsAssembledText(part) {
   return String(part?.type ?? "") === "text" && typeof part?.text === "string" && !part.synthetic && !part.ignored;
 }
 
+function isNonAssistantMessageID(state, messageID) {
+  const role = messageID ? state.messageRoles.get(messageID) : undefined;
+  return role !== undefined && role !== "assistant";
+}
+
 // Rebuild the main-session final message from streamed text-part snapshots.
 // Parts belong to messages, so assemble the text of one target message: the
 // turn's assistant message when known, otherwise the message of the newest
@@ -526,12 +543,22 @@ function partIsAssembledText(part) {
 function rebuildMainSessionText(state, hintMessageID = null) {
   const textParts = [];
   for (const part of state.parts.values()) {
-    if ((part.sessionID ?? state.sessionID) !== state.sessionID || !partIsAssembledText(part)) {
+    if (
+      (part.sessionID ?? state.sessionID) !== state.sessionID ||
+      !partIsAssembledText(part) ||
+      isNonAssistantMessageID(state, part.messageID)
+    ) {
       continue;
     }
     textParts.push(part);
   }
   if (textParts.length === 0) {
+    // A prompt part that streamed in before its message.updated revealed the
+    // user role must not survive as the answer.
+    if (isNonAssistantMessageID(state, state.finalMessageID)) {
+      state.finalMessage = "";
+      state.finalMessageID = null;
+    }
     return;
   }
 
@@ -543,6 +570,7 @@ function rebuildMainSessionText(state, hintMessageID = null) {
     .join("");
   if (text) {
     state.finalMessage = text;
+    state.finalMessageID = target ?? null;
   }
 }
 
@@ -571,6 +599,9 @@ function applyPartSnapshot(state, part) {
   }
 
   if (partIsAssembledText(stored)) {
+    if (!subagentLabel && isNonAssistantMessageID(state, stored.messageID)) {
+      return;
+    }
     if (!subagentLabel) {
       rebuildMainSessionText(state, stored.messageID ?? null);
       if (completed && stored.text) {
@@ -769,6 +800,13 @@ async function applyOpenCodeEvent(client, state, event, meta = {}) {
     // Parts arrive separately via message.part.updated / message.part.delta.
     const info = event?.properties?.info ?? event?.info ?? event?.message ?? null;
     const infoSessionID = info?.sessionID ?? sessionID ?? state.sessionID;
+    if (infoSessionID === state.sessionID && typeof info?.id === "string" && info.id && typeof info.role === "string") {
+      const knownRole = state.messageRoles.get(info.id);
+      state.messageRoles.set(info.id, info.role);
+      if (info.role !== "assistant" && knownRole === undefined) {
+        rebuildMainSessionText(state);
+      }
+    }
     if (info?.role === "assistant" && infoSessionID === state.sessionID) {
       if (typeof info.id === "string" && info.id) {
         state.messageID = info.id;
@@ -1182,10 +1220,30 @@ function buildAuthStatus(fields = {}) {
   };
 }
 
-export function getAvailability(cwd) {
+export function availabilityErrorMessage(availability) {
+  if (availability?.unsupported) {
+    return availability.detail;
+  }
+  return "OpenCode CLI is not installed or is missing headless server support. Install OpenCode, then rerun `/opencode:setup`.";
+}
+
+export function getAvailability(cwd, env = process.env) {
   const versionStatus = binaryAvailable("opencode", ["--version"], { cwd });
   if (!versionStatus.available) {
     return versionStatus;
+  }
+
+  // Reject an unsupported major before anything spawns `opencode serve`. A
+  // user-managed external server is checked by its own health response
+  // instead, since turns never touch the local binary's server API.
+  const versionInfo = parseOpencodeVersionInfo(versionStatus.detail);
+  if (versionInfo && versionInfo.major > SUPPORTED_OPENCODE_MAJOR && !env?.[SERVER_URL_ENV]) {
+    return {
+      available: false,
+      unsupported: true,
+      version: versionInfo.version,
+      detail: unsupportedOpencodeVersionMessage(versionInfo.version)
+    };
   }
 
   const serveStatus = binaryAvailable("opencode", ["serve", "--help"], { cwd });
@@ -1398,7 +1456,7 @@ export async function interruptServerTurn(cwd, { threadId, serverUrl = null, ser
 export async function runServerTurn(cwd, options = {}) {
   const availability = getAvailability(cwd);
   if (!availability.available) {
-    throw new Error("OpenCode CLI is not installed or is missing headless server support. Install OpenCode, then rerun `/opencode:setup`.");
+    throw new Error(availabilityErrorMessage(availability));
   }
 
   const write = Boolean(options.write ?? options.sandbox === "workspace-write");
@@ -1531,7 +1589,7 @@ export async function runServerReview(cwd, options = {}) {
 export async function findLatestTaskThread(cwd) {
   const availability = getAvailability(cwd);
   if (!availability.available) {
-    throw new Error("OpenCode CLI is not installed or is missing headless server support. Install OpenCode, then rerun `/opencode:setup`.");
+    throw new Error(availabilityErrorMessage(availability));
   }
 
   // Compare canonical-to-canonical: stored session directories originate from
@@ -1568,7 +1626,13 @@ export async function importExternalAgentSession(cwd, options = {}) {
     cwd,
     env: options.env
   });
-  const version = parseOpenCodeVersion(versionResult.stdout || versionResult.stderr);
+  const versionOutput = versionResult.stdout || versionResult.stderr;
+  // OpenCode 2.x moved `opencode import` and changed the session format.
+  const versionInfo = parseOpencodeVersionInfo(versionOutput);
+  if (versionInfo && versionInfo.major > SUPPORTED_OPENCODE_MAJOR) {
+    throw new Error(unsupportedOpencodeVersionMessage(versionInfo.version));
+  }
+  const version = parseOpenCodeVersion(versionOutput);
   const transcript = fs.readFileSync(options.sourcePath, "utf8");
   const document = buildOpenCodeImportDocumentFromClaudeJsonl(transcript, {
     cwd,

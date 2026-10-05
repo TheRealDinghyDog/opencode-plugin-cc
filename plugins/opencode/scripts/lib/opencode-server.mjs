@@ -13,6 +13,25 @@ export class OpencodeHttpError extends Error {
   }
 }
 
+// The plugin drives OpenCode's 1.x server API. OpenCode 2.x replaced it with a
+// new /api/* surface, and its retired 1.x routes fall through to the web UI.
+export const SUPPORTED_OPENCODE_MAJOR = 1;
+
+// `opencode --version` prints "1.18.34" on 1.x and "opencode v2.0.20" on 2.x;
+// the /global/health body carries the bare version.
+export function parseOpencodeVersionInfo(text) {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(String(text ?? ""));
+  return match ? { version: match[0], major: Number(match[1]) } : null;
+}
+
+export function unsupportedOpencodeVersionMessage(version) {
+  return (
+    `OpenCode ${version} is not supported yet: this plugin uses the OpenCode 1.x server API, which OpenCode 2.x replaced. ` +
+    "Install the OpenCode 1.x line (`npm install -g opencode-ai`, or OpenCode's Homebrew tap " +
+    "`anomalyco/tap/opencode` after uninstalling the core `opencode` formula), then rerun `/opencode:setup`."
+  );
+}
+
 function trimBaseUrl(url) {
   return String(url ?? "").replace(/\/+$/, "");
 }
@@ -358,8 +377,19 @@ export class OpencodeServerClient {
     });
   }
 
-  health(options = {}) {
-    return this.request("GET", "/global/health", { signal: options.signal });
+  async health(options = {}) {
+    const body = await this.request("GET", "/global/health", { signal: options.signal });
+    // OpenCode 1.x answers {"healthy":true,"version":"..."}. OpenCode 2.x serves
+    // its web UI (HTML, HTTP 200) on this retired route, so anything else is not
+    // a server this plugin can drive.
+    if (!body || typeof body !== "object" || body.healthy !== true) {
+      throw new Error("OpenCode GET /global/health did not return an OpenCode 1.x health response.");
+    }
+    const versionInfo = parseOpencodeVersionInfo(body.version);
+    if (versionInfo && versionInfo.major > SUPPORTED_OPENCODE_MAJOR) {
+      throw new Error(unsupportedOpencodeVersionMessage(versionInfo.version));
+    }
+    return body;
   }
 
   dispose(options = {}) {
