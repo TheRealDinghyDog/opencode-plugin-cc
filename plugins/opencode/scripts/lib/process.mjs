@@ -69,6 +69,29 @@ function looksLikeMissingProcessMessage(text) {
   return /not found|no running instance|cannot find|does not exist|no such process/i.test(text);
 }
 
+// Whether pid is gone within timeoutMs. taskkill fails a process that is
+// already exiting ("The operation attempted is not supported"), so a failed
+// taskkill whose target is gone anyway still stopped it (issue #77).
+function processExitsWithin(pid, killImpl, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      killImpl(pid, 0);
+    } catch (error) {
+      if (error?.code === "ESRCH") {
+        return true;
+      }
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+}
+
+// On Windows, `windowsTree: false` ends the process alone instead of its whole
+// tree. POSIX always signals the process group, which already spares children
+// started detached, like the plugin's shared OpenCode server.
 export function terminateProcessTree(pid, options = {}) {
   if (!Number.isFinite(pid)) {
     return { attempted: false, delivered: false, method: null };
@@ -79,7 +102,8 @@ export function terminateProcessTree(pid, options = {}) {
   const killImpl = options.killImpl ?? process.kill.bind(process);
 
   if (platform === "win32") {
-    const result = runCommandImpl("taskkill", ["/PID", String(pid), "/T", "/F"], {
+    const treeArgs = options.windowsTree === false ? [] : ["/T"];
+    const result = runCommandImpl("taskkill", ["/PID", String(pid), ...treeArgs, "/F"], {
       cwd: options.cwd,
       env: options.env
     });
@@ -107,6 +131,10 @@ export function terminateProcessTree(pid, options = {}) {
 
     if (result.error) {
       throw result.error;
+    }
+
+    if (processExitsWithin(pid, killImpl, options.exitWaitMs)) {
+      return { attempted: true, delivered: true, method: "taskkill", result };
     }
 
     throw new Error(formatCommandFailure(result));
@@ -311,7 +339,11 @@ export function terminateTaskWorkerProcessTree(pid, options = {}) {
     };
   }
 
-  return terminateProcessTree(pid, options);
+  // A worker's only long-lived child is the OpenCode server it may have
+  // started, which other jobs can share. On Windows that server stays in the
+  // worker's process tree even though it was started detached, so end the
+  // worker alone; teardown decides the server's fate by its leases (#77).
+  return terminateProcessTree(pid, { ...options, windowsTree: false });
 }
 
 export function formatCommandFailure(result) {

@@ -231,6 +231,42 @@ test("cancel interrupts a running 2.x background task", { skip: LOCAL_LISTEN_SKI
   }
 });
 
+// Issue #77: two background jobs share one server. On Windows, cancelling
+// one tree-killed its worker, and the server the worker had started went with
+// it. The fake ignores interrupts, so each worker is still alive when cancel
+// ends it.
+test("cancelling one background job leaves the server another job uses", { skip: LOCAL_LISTEN_SKIP }, async () => {
+  const ctx = setup("slow", { FAKE_OPENCODE_V2_IGNORE_INTERRUPT: "1" });
+  const promptCount = () => (readFakeState(ctx.binDir)?.prompts ?? []).length;
+  const waitForPrompts = async (count) => {
+    for (let attempt = 0; attempt < 150 && promptCount() < count; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    assert.equal(promptCount(), count);
+  };
+  const startJob = (text) => {
+    const started = companion(ctx, ["task", "--background", text]);
+    assert.equal(started.status, 0, started.stderr);
+    return started.stdout.match(/background as (\S+)\./)[1];
+  };
+  try {
+    const first = startJob("count forever");
+    await waitForPrompts(1);
+    const second = startJob("count forever too");
+    await waitForPrompts(2);
+    const [firstSession, secondSession] = readFakeState(ctx.binDir).sessions.map((session) => session.id);
+
+    const cancelFirst = companion(ctx, ["cancel", first, "--json"]);
+    assert.equal(cancelFirst.status, 0, cancelFirst.stderr);
+    // Interrupting the second job only works if the server survived.
+    const cancelSecond = companion(ctx, ["cancel", second, "--json"]);
+    assert.equal(cancelSecond.status, 0, cancelSecond.stderr);
+    assert.deepEqual(readFakeState(ctx.binDir).interrupts, [firstSession, secondSession]);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
 test("without the switch, a 2.x CLI is still reported unsupported", { skip: LOCAL_LISTEN_SKIP }, () => {
   const ctx = setup("success", { OPENCODE_COMPANION_EXPERIMENTAL_V2: "" });
   try {

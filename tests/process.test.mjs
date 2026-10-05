@@ -115,6 +115,85 @@ test("terminateTaskWorkerProcessTree keeps process-group termination for matchin
   assert.equal(outcome.method, "process-group");
 });
 
+// Issue #77: a worker's Windows process tree includes the OpenCode server it
+// started, which other jobs may share; cancel must end the worker alone.
+test("terminateTaskWorkerProcessTree ends only the worker on Windows", () => {
+  const calls = [];
+  const outcome = terminateTaskWorkerProcessTree(1234, {
+    jobId: "job-expected",
+    platform: "win32",
+    runCommandImpl(command, args) {
+      calls.push({ command, args });
+      const stdout =
+        command === "powershell.exe"
+          ? 'node C:/repo/plugins/opencode/scripts/opencode-companion.mjs task-worker --cwd C:/repo --job-id job-expected\r\n'
+          : "SUCCESS: The process with PID 1234 has been terminated.\r\n";
+      return { command, args, status: 0, signal: null, stdout, stderr: "", error: null };
+    },
+    killImpl() {
+      throw new Error("kill fallback should not run");
+    }
+  });
+
+  assert.deepEqual(calls.map((call) => call.command), ["powershell.exe", "taskkill"]);
+  assert.deepEqual(calls[1].args, ["/PID", "1234", "/F"]);
+  assert.equal(outcome.delivered, true);
+  assert.equal(outcome.method, "taskkill");
+});
+
+// Issue #77: taskkill fails a process that is already exiting with "The
+// operation attempted is not supported". The target being gone is success.
+test("terminateProcessTree accepts a failed taskkill once the target is gone", () => {
+  const probes = [];
+  const outcome = terminateProcessTree(1234, {
+    platform: "win32",
+    runCommandImpl(command, args) {
+      return {
+        command,
+        args,
+        status: 128,
+        signal: null,
+        stdout: "",
+        stderr:
+          "ERROR: The process with PID 6876 (child process of PID 1234) could not be terminated.\r\nReason: The operation attempted is not supported.\r\n",
+        error: null
+      };
+    },
+    killImpl(pid, signal) {
+      probes.push({ pid, signal });
+      throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+    }
+  });
+
+  assert.deepEqual(probes, [{ pid: 1234, signal: 0 }]);
+  assert.equal(outcome.attempted, true);
+  assert.equal(outcome.delivered, true);
+  assert.equal(outcome.result.status, 128);
+});
+
+test("terminateProcessTree still fails when taskkill fails and the target lives on", () => {
+  assert.throws(
+    () =>
+      terminateProcessTree(1234, {
+        platform: "win32",
+        exitWaitMs: 0,
+        runCommandImpl(command, args) {
+          return {
+            command,
+            args,
+            status: 1,
+            signal: null,
+            stdout: "",
+            stderr: "ERROR: The process with PID 1234 could not be terminated.\r\nReason: Access is denied.\r\n",
+            error: null
+          };
+        },
+        killImpl() {}
+      }),
+    /taskkill \/PID 1234 \/T \/F: exit=1: ERROR: .*Access is denied/s
+  );
+});
+
 test("runExecutable passes arguments through intact, with no shell to reinterpret them (issue #65)", () => {
   const tricky = `(Get-CimInstance Win32_Process -Filter 'ProcessId = 1').CommandLine "quoted"`;
   const result = runExecutable(process.execPath, ["-e", "process.stdout.write(process.argv[1])", tricky]);

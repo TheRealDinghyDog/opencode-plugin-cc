@@ -70,7 +70,9 @@ async function cleanupSessionJobs(cwd, sessionId) {
       continue;
     }
     try {
-      terminateProcessTree(job.pid ?? Number.NaN);
+      // The worker alone: on Windows its tree includes the OpenCode server it
+      // started, which the server teardown below handles by its leases (#77).
+      terminateProcessTree(job.pid ?? Number.NaN, { windowsTree: false });
     } catch {
       // Ignore teardown failures during session shutdown.
     }
