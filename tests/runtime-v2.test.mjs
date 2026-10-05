@@ -213,6 +213,32 @@ test("--effort without --model asks for the model on 2.x instead of guessing one
   }
 });
 
+// Issue #86: 2.x keeps the agent on the session. A read-only follow-up to a
+// write task must not keep the write-capable agent, and vice versa.
+test("resuming a 2.x session switches it to the agent the follow-up asks for", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup();
+  try {
+    assert.equal(companion(ctx, ["task", "--write", "make the change"]).status, 0);
+    const readOnly = companion(ctx, ["task", "--resume-last", "now just explain it"]);
+    assert.equal(readOnly.status, 0, readOnly.stderr);
+    const write = companion(ctx, ["task", "--resume-last", "--write", "apply the fix after all"]);
+    assert.equal(write.status, 0, write.stderr);
+
+    const state = readFakeState(ctx.binDir);
+    assert.equal(state.sessions.length, 1);
+    assert.deepEqual(
+      state.prompts.map((prompt) => prompt.agent),
+      ["build", "plan", "build"]
+    );
+    assert.deepEqual(
+      state.agentChanges.map((change) => change.agent),
+      ["plan", "build"]
+    );
+  } finally {
+    cleanup(ctx);
+  }
+});
+
 test("--resume-last continues the workspace's latest 2.x task session", { skip: LOCAL_LISTEN_SKIP }, () => {
   const ctx = setup();
   try {

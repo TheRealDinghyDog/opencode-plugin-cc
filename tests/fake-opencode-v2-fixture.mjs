@@ -577,6 +577,21 @@ function startServer(args) {
         sendJson(res, { data: session ?? null });
       }
     ],
+    [
+      "POST",
+      /^\/api\/session\/([^/]+)\/agent$/,
+      async (req, res, [sessionID]) => {
+        const body = await readJson(req);
+        const session = sessions.get(sessionID);
+        if (session) {
+          session.agent = body.agent;
+        }
+        updateState((state) => {
+          state.agentChanges = [...(state.agentChanges ?? []), { sessionID, agent: body.agent }];
+        });
+        sendJson(res, { data: session ?? null });
+      }
+    ],
     ["GET", /^\/api\/provider$/, (req, res) => sendJson(res, { data: [{ id: "fake", name: "Fake" }] })],
     [
       "GET",
@@ -630,7 +645,7 @@ function startServer(args) {
         }
         const body = await readJson(req);
         updateState((state) => {
-          state.prompts.push({ sessionID, body });
+          state.prompts.push({ sessionID, body, agent: session.agent });
         });
         const inbox = { id: id("msg"), sessionID, time: { created: Date.now() }, type: "user", payload: { text: body.text }, delivery: "steer" };
         sendJson(res, { data: inbox });

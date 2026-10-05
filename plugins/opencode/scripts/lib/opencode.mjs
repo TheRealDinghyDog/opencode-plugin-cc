@@ -1673,6 +1673,13 @@ async function runV2Turn(cwd, client, server, options) {
       threadId: sessionID,
       serverUrl: server.url
     });
+    // 2.x keeps the agent on the session, so a resumed session still has the
+    // agent of the turn that created it: switch it, or a read-only follow-up
+    // to a write task could still write (issue #86). 1.x sends the agent with
+    // every prompt.
+    if (options.agent) {
+      await client.setAgent(sessionID, options.agent);
+    }
     if (model) {
       await client.setModel(sessionID, model);
     }

@@ -178,6 +178,14 @@ export class OpencodeV2Client {
     });
   }
 
+  // 2.x keeps the agent on the session, not on each prompt.
+  setAgent(sessionID, agent, options = {}) {
+    return this.request("POST", `/api/session/${encodePathSegment(sessionID)}/agent`, {
+      body: { agent },
+      signal: options.signal
+    });
+  }
+
   deleteSession(sessionID, options = {}) {
     return this.request("DELETE", `/api/session/${encodePathSegment(sessionID)}`, { signal: options.signal });
   }
