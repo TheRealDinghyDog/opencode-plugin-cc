@@ -62,8 +62,14 @@ function buildUnavailableReviewerReason(cwd) {
     return null;
   }
 
+  const blocking = "OpenCode reviewer is unavailable, so the enabled stop-time review gate is blocking this stop.";
+  const disable = "disable the gate with `/opencode:setup --disable-review-gate`.";
+  // An unsupported version runs fine; its message says what to install instead.
+  if (availability.unsupported) {
+    return `${blocking} ${availability.detail} Or ${disable}`;
+  }
   const detail = availability.detail ? ` Details: ${availability.detail}.` : "";
-  return `OpenCode reviewer is unavailable, so the enabled stop-time review gate is blocking this stop.${detail} Restore OpenCode (ensure \`opencode --version\` works) and rerun \`/opencode:setup\`, or disable the gate with \`/opencode:setup --disable-review-gate\`.`;
+  return `${blocking}${detail} Restore OpenCode (ensure \`opencode --version\` works) and rerun \`/opencode:setup\`, or ${disable}`;
 }
 
 function parseStopReviewOutput(rawOutput) {

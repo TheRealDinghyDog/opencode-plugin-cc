@@ -9,7 +9,7 @@ import { extractJsonObject } from "../plugins/opencode/scripts/lib/opencode.mjs"
 import { saveState } from "../plugins/opencode/scripts/lib/state.mjs";
 import { HEADLESS_PERMISSION_MESSAGE } from "../plugins/opencode/scripts/lib/turn-capture-v2.mjs";
 import { readFakeState } from "./fake-opencode-fixture.mjs";
-import { installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
+import { FAKE_SECRET, installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 
 // The companion's commands, end to end, against the fake OpenCode 2.x
@@ -46,7 +46,6 @@ function setup(scenario = "success", extra = {}) {
     FAKE_OPENCODE_V2_SCENARIO: scenario,
     CLAUDE_PLUGIN_DATA: makeTempDir("opencode-plugin-data-"),
     OPENCODE_COMPANION_SESSION_ID: "sess-v2",
-    OPENCODE_COMPANION_EXPERIMENTAL_V2: "1",
     ...extra
   };
   delete env.OPENCODE_COMPANION_SERVER_URL;
@@ -190,6 +189,30 @@ test("--model and --effort become a validated 2.x model reference", { skip: LOCA
   }
 });
 
+// Issue #82: a just-started 2.x server lists no models for a few seconds.
+test("--model works on a 2.x server whose model list is still loading", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", { FAKE_OPENCODE_V2_MODELS_SETTLE_MS: "2500" });
+  try {
+    const result = companion(ctx, ["task", "--model", "fake/fake-model", "go"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(readFakeState(ctx.binDir).sessions[0].body.model, { providerID: "fake", id: "fake-model" });
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("--effort without --model asks for the model on 2.x instead of guessing one", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup();
+  try {
+    const result = companion(ctx, ["task", "--effort", "high", "go"]);
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /On OpenCode 2\.x, --effort needs --model provider\/model as well/);
+    assert.equal(readFakeState(ctx.binDir).prompts.length, 0);
+  } finally {
+    cleanup(ctx);
+  }
+});
+
 test("--resume-last continues the workspace's latest 2.x task session", { skip: LOCAL_LISTEN_SKIP }, () => {
   const ctx = setup();
   try {
@@ -267,12 +290,51 @@ test("cancelling one background job leaves the server another job uses", { skip:
   }
 });
 
-test("without the switch, a 2.x CLI is still reported unsupported", { skip: LOCAL_LISTEN_SKIP }, () => {
-  const ctx = setup("success", { OPENCODE_COMPANION_EXPERIMENTAL_V2: "" });
+// #56: setup on 2.x reads stored logins, not providers or models (#82), and
+// never shows a credential's secret, which the route returns with each entry.
+test("setup on 2.x reports its logins, labelled experimental, without any secret", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success");
+  try {
+    const json = companion(ctx, ["setup", "--json"]);
+    assert.equal(json.status, 0, json.stderr);
+    const report = JSON.parse(json.stdout);
+    assert.equal(report.ready, true);
+    assert.equal(report.opencode.experimental, true);
+    assert.match(report.opencode.detail, /OpenCode 2\.x support is experimental/);
+    assert.equal(report.auth.detail, "OpenCode 2.x logins: fake");
+    assert.ok(report.notes.some((note) => /opencode auth login/.test(note)));
+
+    const rendered = companion(ctx, ["setup"]);
+    assert.equal(rendered.status, 0, rendered.stderr);
+    assert.match(rendered.stdout, /Notes:\n- OpenCode 2\.x support is experimental/);
+    for (const output of [json.stdout, json.stderr, rendered.stdout, rendered.stderr]) {
+      assert.ok(!output.includes(FAKE_SECRET), "a credential secret reached setup's output");
+    }
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("setup on 2.x without a stored login says how to log in", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", { FAKE_OPENCODE_V2_NO_CREDENTIALS: "1" });
+  try {
+    const result = companion(ctx, ["setup", "--json"]);
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ready, false);
+    assert.match(report.auth.detail, /No stored OpenCode 2\.x login/);
+    assert.ok(report.nextSteps.some((step) => /opencode auth login <provider>/.test(step)));
+  } finally {
+    cleanup(ctx);
+  }
+});
+
+test("a 3.x CLI is reported unsupported and starts no server", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const ctx = setup("success", { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0" });
   try {
     const result = companion(ctx, ["task", "check"]);
     assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}${result.stderr}`, /OpenCode 2\.0\.20 is not supported yet/);
+    assert.match(`${result.stdout}${result.stderr}`, /OpenCode 3\.0\.0 is not supported yet/);
     assert.equal(readFakeState(ctx.binDir)?.serverStarts ?? 0, 0);
   } finally {
     cleanup(ctx);

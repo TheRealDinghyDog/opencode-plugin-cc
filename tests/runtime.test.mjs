@@ -396,6 +396,34 @@ test("stop review gate blocks when the enabled OpenCode reviewer is unavailable"
   });
 });
 
+test("stop review gate names the supported versions when OpenCode is an unsupported major", () => {
+  const workspace = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  const pluginDataDir = makeTempDir("opencode-plugin-data-");
+  const env = buildTestEnv(binDir, {
+    CLAUDE_PLUGIN_DATA: pluginDataDir,
+    OPENCODE_COMPANION_SESSION_ID: "sess-current",
+    FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0"
+  });
+
+  return withProcessEnv({ CLAUDE_PLUGIN_DATA: pluginDataDir }, () => {
+    saveState(workspace, { version: 1, config: { stopReviewGate: true }, jobs: [] });
+    const result = run(process.execPath, [STOP_HOOK], {
+      cwd: workspace,
+      env,
+      input: JSON.stringify({ cwd: workspace, session_id: env.OPENCODE_COMPANION_SESSION_ID })
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, "block");
+    assert.match(decision.reason, /OpenCode 3\.0\.0 is not supported yet: this plugin supports OpenCode 1\.x, and 2\.x/);
+    assert.match(decision.reason, /--disable-review-gate/);
+    assert.doesNotMatch(decision.reason, /ensure `opencode --version` works/);
+  });
+});
+
 test("stop review gate tears down a server left by a failed stop review task", { skip: LOCAL_LISTEN_SKIP }, async () => {
   const workspace = makeTempDir();
   const binDir = makeTempDir();
@@ -1587,11 +1615,11 @@ test("a review whose provider fails reports the error, not the review prompt", {
   }
 });
 
-test("setup rejects an OpenCode 2.x CLI without starting a server", { skip: LOCAL_LISTEN_SKIP }, () => {
+test("setup rejects an unsupported OpenCode major without starting a server", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
-  const env = buildTestEnv(binDir, { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20" });
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0" });
 
   try {
     const result = run("node", [SCRIPT, "setup", "--json"], { cwd: repo, env });
@@ -1600,8 +1628,8 @@ test("setup rejects an OpenCode 2.x CLI without starting a server", { skip: LOCA
     assert.equal(payload.ready, false);
     assert.equal(payload.opencode.available, false);
     assert.equal(payload.opencode.unsupported, true);
-    assert.equal(payload.opencode.version, "2.0.20");
-    assert.match(payload.opencode.detail, /OpenCode 2\.0\.20 is not supported yet/);
+    assert.equal(payload.opencode.version, "3.0.0");
+    assert.match(payload.opencode.detail, /OpenCode 3\.0\.0 is not supported yet/);
     assert.match(payload.opencode.detail, /npm install -g opencode-ai/);
     assert.ok(payload.nextSteps.some((step) => /not supported yet/.test(step)));
     assert.equal(readServerBootCount(binDir), 0);
@@ -1610,29 +1638,29 @@ test("setup rejects an OpenCode 2.x CLI without starting a server", { skip: LOCA
   }
 });
 
-test("a task on an OpenCode 2.x CLI fails with the unsupported-version message", { skip: LOCAL_LISTEN_SKIP }, () => {
+test("a task on an unsupported OpenCode major fails with the unsupported-version message", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
   initCommittedRepo(repo);
-  const env = buildTestEnv(binDir, { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20" });
+  const env = buildTestEnv(binDir, { FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0" });
 
   try {
     const result = run("node", [SCRIPT, "task", "check the fixture"], { cwd: repo, env });
     assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}\n${result.stderr}`, /OpenCode 2\.0\.20 is not supported yet/);
+    assert.match(`${result.stdout}\n${result.stderr}`, /OpenCode 3\.0\.0 is not supported yet/);
     assert.equal(readServerBootCount(binDir), 0);
   } finally {
     cleanupServer(repo, env);
   }
 });
 
-test("an external server bypasses the local OpenCode 2.x CLI gate", async () => {
+test("an external server bypasses the local CLI's unsupported-major gate", async () => {
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
   const workspace = makeTempDir();
   await withProcessEnv(
-    { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`, FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20" },
+    { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`, FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0" },
     async () => {
       const { getOpencodeAvailability } = await import("../plugins/opencode/scripts/lib/opencode.mjs");
       const local = getOpencodeAvailability(workspace, {});

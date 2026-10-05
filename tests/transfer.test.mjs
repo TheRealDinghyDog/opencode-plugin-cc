@@ -247,7 +247,7 @@ test("importExternalAgentSession returns the imported session when temp cleanup 
   }
 });
 
-test("transfer refuses an OpenCode 2.x CLI before importing anything", () => {
+test("transfer refuses an unsupported OpenCode major before importing anything", () => {
   const repo = makeTempDir();
   const home = makeTempDir("opencode-plugin-home-");
   const binDir = makeTempDir();
@@ -262,12 +262,12 @@ test("transfer refuses an OpenCode 2.x CLI before importing anything", () => {
     HOME: home,
     USERPROFILE: home,
     OPENCODE_COMPANION_TRANSCRIPT_PATH: transcriptPath,
-    FAKE_OPENCODE_VERSION_OUTPUT: "opencode v2.0.20"
+    FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0"
   });
   const result = run("node", [SCRIPT, "transfer"], { cwd: repo, env });
 
   assert.notEqual(result.status, 0);
-  assert.match(`${result.stdout}\n${result.stderr}`, /OpenCode 2\.0\.20 is not supported yet/);
+  assert.match(`${result.stdout}\n${result.stderr}`, /OpenCode 3\.0\.0 is not supported yet/);
   assert.equal(readFakeState(binDir)?.imports?.length ?? 0, 0);
 });
 
@@ -344,8 +344,7 @@ test("transfer imports into OpenCode 2.x with session import --standalone (#55)"
   const env = buildEnv(binDir, {
     HOME: home,
     USERPROFILE: home,
-    OPENCODE_COMPANION_TRANSCRIPT_PATH: transcriptPath,
-    OPENCODE_COMPANION_EXPERIMENTAL_V2: "1"
+    OPENCODE_COMPANION_TRANSCRIPT_PATH: transcriptPath
   });
   const result = run("node", [SCRIPT, "transfer", "--json"], { cwd: repo, env });
 

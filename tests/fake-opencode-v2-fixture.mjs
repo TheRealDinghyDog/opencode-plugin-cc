@@ -52,6 +52,7 @@ import(${JSON.stringify(moduleUrl)})
 }
 
 const DEFAULT_REPLY = "Handled the requested task.\nTask prompt accepted.";
+export const FAKE_SECRET = "sk-fake-secret-must-never-show";
 const MODEL = { id: "fake-model", providerID: "fake", variant: "none" };
 
 function statePath() {
@@ -181,6 +182,7 @@ function importSession(args) {
 }
 
 function startServer(args) {
+  const startedAt = Date.now();
   const hostname = args[args.indexOf("--hostname") + 1] || "127.0.0.1";
   const port = Number(args[args.indexOf("--port") + 1] || 0);
   updateState((state) => {
@@ -514,7 +516,12 @@ function startServer(args) {
   }
 
   const routes = [
-    ["GET", /^\/api\/info$/, (req, res) => sendJson(res, { version: "2.0.20", pid: process.pid, urls: [], paths: {} })],
+    [
+      "GET",
+      /^\/api\/info$/,
+      (req, res) =>
+        sendJson(res, { version: process.env.FAKE_OPENCODE_V2_VERSION || "2.0.20", pid: process.pid, urls: [], paths: {} })
+    ],
     [
       "GET",
       /^\/api\/event$/,
@@ -547,7 +554,11 @@ function startServer(args) {
       /^\/api\/model$/,
       (req, res) =>
         sendJson(res, {
-          data: [{ ...MODEL, modelID: MODEL.id, variants: [{ id: "none" }, { id: "low" }, { id: "high" }] }]
+          // Like a real 2.x server just after it starts, list nothing for a while (#82).
+          data:
+            Date.now() - startedAt < Number(process.env.FAKE_OPENCODE_V2_MODELS_SETTLE_MS || 0)
+              ? []
+              : [{ ...MODEL, modelID: MODEL.id, variants: [{ id: "none" }, { id: "low" }, { id: "high" }] }]
         })
     ],
     ["GET", /^\/api\/model\/default$/, (req, res) => sendJson(res, { data: { ...MODEL, modelID: MODEL.id } })],
@@ -567,7 +578,21 @@ function startServer(args) {
       }
     ],
     ["GET", /^\/api\/provider$/, (req, res) => sendJson(res, { data: [{ id: "fake", name: "Fake" }] })],
-    ["GET", /^\/api\/credential$/, (req, res) => sendJson(res, { data: [{ id: "cred_fake", integrationID: "fake", active: true }] })],
+    [
+      "GET",
+      /^\/api\/credential$/,
+      (req, res) =>
+        sendJson(res, {
+          // Like the real route, each entry carries the secret; the plugin must never show it.
+          data:
+            process.env.FAKE_OPENCODE_V2_NO_CREDENTIALS === "1"
+              ? []
+              : [
+                  { id: "cred_fake", integrationID: "fake", label: "API key", active: true, value: { type: "key", key: FAKE_SECRET } },
+                  { id: "cred_old", integrationID: "stale", label: "API key", active: false, value: { type: "key", key: FAKE_SECRET } }
+                ]
+        })
+    ],
     // Like the real 2.0.20 server, the list ignores the location filter.
     ["GET", /^\/api\/session$/, (req, res) => sendJson(res, { data: [...sessions.values()].reverse() })],
     [

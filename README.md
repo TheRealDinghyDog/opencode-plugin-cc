@@ -18,9 +18,17 @@ they already have.
 
 ## Requirements
 
-- **A working local OpenCode 1.x install and provider configuration.**
+- **A working local OpenCode install and provider configuration.**
   - Usage is billed by whichever OpenCode provider/model you select.
-  - OpenCode 2.x is not supported yet: it replaced the server API this plugin uses. `npm install -g opencode-ai`, the `opencode.ai/install` script, and OpenCode's Homebrew tap (`brew install anomalyco/tap/opencode`) install the 1.x line. The core Homebrew formula (`brew install opencode`) installs 2.x; `/opencode:setup` reports it as unsupported.
+  - Supported OpenCode versions:
+
+    | OpenCode | Status | Installed by |
+    |---|---|---|
+    | 1.x | Supported | `npm install -g opencode-ai`, the `opencode.ai/install` script, OpenCode's Homebrew tap (`brew install anomalyco/tap/opencode`), Scoop, Chocolatey |
+    | 2.x | **Experimental** | the core Homebrew formula (`brew install opencode`) |
+    | later | Refused until tested | |
+
+    2.x replaced the server API that 1.x uses, so the plugin drives each through its own client and picks the right one automatically. 2.x support has been tested against a real 2.x server on macOS only; on Linux and Windows it has run only against the plugin's own fake 2.x server in CI. See [OpenCode 2.x](#opencode-2x).
 - **Node.js 18.18 or later**
 
 The plugin starts its own local `opencode serve` on demand, bound to `127.0.0.1` and protected with a per-server random password (HTTP Basic auth), so other local processes cannot reach its API. If you point the plugin at your own server via `OPENCODE_COMPANION_SERVER_URL` and that server is password-protected, also export `OPENCODE_SERVER_PASSWORD` (and `OPENCODE_SERVER_USERNAME` if you customized it).
@@ -222,7 +230,7 @@ Examples:
 
 ### `/opencode:setup`
 
-Checks whether OpenCode is installed and authenticated.
+Checks whether OpenCode is installed and authenticated, and labels OpenCode 2.x as experimental.
 If OpenCode is missing and npm is available, it can offer to install OpenCode for you.
 
 You can also use `/opencode:setup` to manage the optional review gate.
@@ -287,11 +295,24 @@ Delegated tasks and any [stop gate](#what-does-the-review-gate-do) run can also 
 
 This way you can review the OpenCode work or continue the work there.
 
+### OpenCode 2.x
+
+OpenCode 2.x support is experimental. All the plugin's commands support 2.x, with these differences:
+
+- **Logins.** 2.x keeps its own logins, separate from OpenCode 1.x and the desktop app. If a provider that works elsewhere rejects requests, log in again with `opencode auth login <provider>`. `/opencode:setup` lists the stored 2.x logins.
+- **Reviews.** 2.x has no structured-output mode, so the plugin puts the review's JSON schema in the prompt and reads the JSON from OpenCode's reply. If the reply isn't valid, the plugin asks once more in the same session.
+- **Questions.** When OpenCode stops a task to ask a question, the plugin hands the question back to Claude, which answers by resuming the task.
+- **`--effort`** needs `--model` as well, since 2.x sets the effort on a specific model.
+
 ## FAQ
+
+### Which model does the plugin use?
+
+Your OpenCode default: the `model` setting in your OpenCode config (`opencode.json`), or OpenCode's own choice when you haven't set one. Pass `--model provider/model` to pick one for a single command.
 
 ### Do I need a separate OpenCode account for this plugin?
 
-If you are already signed into OpenCode on this machine, that account should work immediately here too. This plugin uses your local OpenCode CLI authentication.
+If you are already signed into OpenCode on this machine, that account should work immediately here too. This plugin uses your local OpenCode CLI authentication. OpenCode 2.x keeps its logins separately from 1.x: see [OpenCode 2.x](#opencode-2x).
 
 If you only use Claude Code today and have not used OpenCode yet, configure an OpenCode provider first. Run `/opencode:setup` to check whether OpenCode is ready.
 
