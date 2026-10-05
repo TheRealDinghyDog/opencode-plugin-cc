@@ -13,9 +13,23 @@ export function buildEnv(binDir, extra = {}) {
   };
 }
 
+// The fake servers rewrite this file in place, so a test polling it while a
+// server is running can read it half-written: retry briefly before failing.
 export function readFakeState(binDir) {
   const statePath = path.join(binDir, "fake-opencode-state.json");
-  return fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : null;
+  for (let attempt = 0; ; attempt += 1) {
+    if (!fs.existsSync(statePath)) {
+      return null;
+    }
+    try {
+      return JSON.parse(fs.readFileSync(statePath, "utf8"));
+    } catch (error) {
+      if (!(error instanceof SyntaxError) || attempt >= 20) {
+        throw error;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
 }
 
 export function readServerBootCount(binDir) {
