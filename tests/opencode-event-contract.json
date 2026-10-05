@@ -360,5 +360,63 @@
         "revert"
       ]
     }
-  }
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/global/health"
+    },
+    {
+      "method": "POST",
+      "path": "/global/dispose"
+    },
+    {
+      "method": "GET",
+      "path": "/event"
+    },
+    {
+      "method": "GET",
+      "path": "/config"
+    },
+    {
+      "method": "GET",
+      "path": "/provider"
+    },
+    {
+      "method": "GET",
+      "path": "/session"
+    },
+    {
+      "method": "POST",
+      "path": "/session"
+    },
+    {
+      "method": "DELETE",
+      "path": "/session/{sessionID}"
+    },
+    {
+      "method": "GET",
+      "path": "/session/{sessionID}/message"
+    },
+    {
+      "method": "POST",
+      "path": "/session/{sessionID}/message"
+    },
+    {
+      "method": "POST",
+      "path": "/session/{sessionID}/prompt_async"
+    },
+    {
+      "method": "POST",
+      "path": "/session/{sessionID}/abort"
+    },
+    {
+      "method": "POST",
+      "path": "/session/{sessionID}/permissions/{permissionID}"
+    },
+    {
+      "method": "POST",
+      "path": "/question/{requestID}/reject"
+    }
+  ]
 }

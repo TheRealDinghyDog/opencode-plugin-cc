@@ -1,0 +1,85 @@
+name: OpenCode canary
+
+# CI only runs the plugin against a fake OpenCode, and the plugin directory's
+# health score only counts plugin loads. This runs the plugin against the real
+# OpenCode builds users install, so upstream API changes show up here before
+# users hit them (issue #49).
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  # Changes to the canary or to the contracts it checks get a real run too
+  # (issues are only filed on schedule or by explicit dispatch).
+  pull_request:
+    paths:
+      - .github/workflows/opencode-canary.yml
+      - scripts/opencode-canary.mjs
+      - tests/opencode-event-contract.json
+      - tests/opencode-v2-contract.json
+  workflow_dispatch:
+    inputs:
+      file_issues:
+        description: Open, update or close canary issues for this run
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: opencode-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: Canary (${{ matrix.channel }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # What the README and /opencode:setup tell people to install.
+          - channel: npm-latest
+            os: ubuntu-latest
+          # The core Homebrew formula tracks every upstream tag; it shipped
+          # OpenCode 2.x before any other channel.
+          - channel: homebrew
+            os: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # OpenCode runs in this job; keep the token out of .git/config.
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+
+      - name: Install OpenCode (npm)
+        if: matrix.channel == 'npm-latest'
+        run: npm install -g opencode-ai@latest
+
+      - name: Install OpenCode (Homebrew)
+        if: matrix.channel == 'homebrew'
+        run: brew install opencode
+
+      # No GitHub token in this step: it runs OpenCode.
+      - name: Run canary
+        run: >-
+          node scripts/opencode-canary.mjs
+          --channel "${{ matrix.channel }}"
+          --turn
+          --report canary-report.json
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      # Never starts OpenCode; only reads the report and talks to GitHub.
+      - name: File canary issues
+        if: always() && (github.event_name == 'schedule' || inputs.file_issues)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/opencode-canary.mjs --file-issues canary-report.json --channel "${{ matrix.channel }}"
