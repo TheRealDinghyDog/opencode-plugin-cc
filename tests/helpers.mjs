@@ -4,6 +4,11 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 
+// The companion prefers OPENCODE_COMPANION_PLUGIN_DATA over CLAUDE_PLUGIN_DATA,
+// and a Claude session with this plugin installed exports it. Tests choose
+// their state directory through CLAUDE_PLUGIN_DATA, so drop the session's.
+delete process.env.OPENCODE_COMPANION_PLUGIN_DATA;
+
 export function makeTempDir(prefix = "opencode-plugin-test-") {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
