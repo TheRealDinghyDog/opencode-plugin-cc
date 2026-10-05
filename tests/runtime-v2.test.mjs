@@ -73,7 +73,7 @@ test("a read-only task runs on OpenCode 2.x with the plan agent and no session p
     const [session] = readFakeState(ctx.binDir).sessions;
     assert.equal(session.body.agent, "plan");
     assert.match(session.body.title, /^OpenCode Companion Task/);
-    assert.equal(session.body.location.directory, fs.realpathSync(ctx.repo));
+    assert.equal(session.body.location.directory, fs.realpathSync.native(ctx.repo));
     assert.ok(!("permissions" in session.body), "no session-wide permission rules (issue #26)");
     assert.ok(!("model" in session.body), "the server's default model is used");
   } finally {
