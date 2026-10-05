@@ -395,7 +395,10 @@ export class OpencodeServerClient {
   }
 
   async health(options = {}) {
-    const body = await this.request("GET", "/global/health", { signal: options.signal });
+    const body = await this.request("GET", "/global/health", {
+      signal: options.signal,
+      headers: options.closeConnection ? { connection: "close" } : undefined
+    });
     // OpenCode 1.x answers {"healthy":true,"version":"..."}. OpenCode 2.x serves
     // its web UI (HTML, HTTP 200) on this retired route, so anything else is not
     // a server this plugin can drive.

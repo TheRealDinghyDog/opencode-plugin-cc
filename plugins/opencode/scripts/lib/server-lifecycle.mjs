@@ -111,10 +111,15 @@ async function withTimeout(fn, timeoutMs) {
 // JSON, 2.x serves its web UI there and reports itself on /api/info. Throws
 // when neither answers, keeping the 1.x error unless /api/info rejected the
 // credentials or named an unsupported version.
+// Probes ask the server to close their connection (issue #71). Right after a
+// probe, ensureServer runs PowerShell on Windows, and spawnSync blocks the
+// event loop for seconds: a keep-alive socket the probe left in fetch's pool
+// went stale meanwhile (the server closes it after 5s idle), and the next
+// request, POST /session, failed with ECONNRESET.
 async function probeServerApi(url, credentials, signal) {
   let v1Error;
   try {
-    await new OpencodeServerClient(url, credentials).health({ signal });
+    await new OpencodeServerClient(url, credentials).health({ signal, closeConnection: true });
     return 1;
   } catch (error) {
     if (error?.status === 401 || error?.code === "OPENCODE_UNSUPPORTED_VERSION") {
@@ -123,7 +128,7 @@ async function probeServerApi(url, credentials, signal) {
     v1Error = error;
   }
   try {
-    await new OpencodeV2Client(url, credentials).health({ signal });
+    await new OpencodeV2Client(url, credentials).health({ signal, closeConnection: true });
     return 2;
   } catch (error) {
     // 2.x serves its retired 1.x routes without auth, so a missing or wrong
