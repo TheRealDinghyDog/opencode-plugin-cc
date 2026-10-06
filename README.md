@@ -158,8 +158,7 @@ Examples:
 /opencode:rescue investigate why the tests started failing
 /opencode:rescue fix the failing test with the smallest safe patch
 /opencode:rescue --resume apply the top fix from the last run
-/opencode:rescue --model openai/gpt-5.4-mini --effort high investigate the flaky integration test
-/opencode:rescue --model spark fix the issue quickly
+/opencode:rescue --model deepseek/deepseek-flash --effort high investigate the flaky integration test
 /opencode:rescue --background investigate the regression
 ```
 
@@ -172,7 +171,7 @@ Ask OpenCode to redesign the database connection to be more resilient.
 **Notes:**
 
 - if you do not pass `--model` or `--effort`, OpenCode chooses its own defaults.
-- if you say `spark`, the plugin maps that to `openai/gpt-5.3-codex-spark`
+- `--model` takes the `provider/model` form that `opencode models` lists, such as `deepseek/deepseek-flash`
 - follow-up rescue requests can continue the latest OpenCode task in the repo
 
 ### `/opencode:transfer`
@@ -286,7 +285,7 @@ The OpenCode plugin wraps a local `opencode serve` process. It uses the global `
 If you want to change the default model used by the plugin, configure it in OpenCode. You can also pass a provider/model pair explicitly:
 
 ```bash
-/opencode:rescue --model openai/gpt-5.4-mini --effort high investigate the flaky integration test
+/opencode:rescue --model deepseek/deepseek-flash --effort high investigate the flaky integration test
 ```
 
 `--effort` is forwarded to OpenCode as the provider-specific message `variant`.

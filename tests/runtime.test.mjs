@@ -914,7 +914,7 @@ test("plugin-owned server requires auth for HTTP and SSE and never leaks the pas
   }
 });
 
-test("task forwards spark model alias and effort as OpenCode variant", { skip: LOCAL_LISTEN_SKIP }, () => {
+test("task forwards a provider/model and effort as the OpenCode model and variant", { skip: LOCAL_LISTEN_SKIP }, () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   installFakeOpencode(binDir);
@@ -922,18 +922,38 @@ test("task forwards spark model alias and effort as OpenCode variant", { skip: L
   const env = buildTestEnv(binDir);
 
   try {
-    const result = run("node", [SCRIPT, "task", "--json", "--model", "spark", "--effort", "high", "check model"], {
-      cwd: repo,
-      env
-    });
+    const result = run(
+      "node",
+      [SCRIPT, "task", "--json", "--model", "deepseek/deepseek-flash", "--effort", "high", "check model"],
+      { cwd: repo, env }
+    );
 
     assert.equal(result.status, 0, result.stderr);
     const fakeState = readFakeState(binDir);
     assert.deepEqual(fakeState.lastMessage.body.model, {
-      providerID: "openai",
-      modelID: "gpt-5.3-codex-spark"
+      providerID: "deepseek",
+      modelID: "deepseek-flash"
     });
     assert.equal(fakeState.lastMessage.body.variant, "high");
+  } finally {
+    cleanupServer(repo, env);
+  }
+});
+
+// Issue #97: the Codex-era `spark` alias is gone, and a bare model name used
+// to fall back to the default model without a word.
+test("a --model without a provider fails with the form it needs", { skip: LOCAL_LISTEN_SKIP }, () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeOpencode(binDir);
+  initGitRepo(repo);
+  const env = buildTestEnv(binDir);
+
+  try {
+    const result = run("node", [SCRIPT, "task", "--model", "spark", "check model"], { cwd: repo, env });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /--model needs the provider\/model form, such as deepseek\/deepseek-flash \(got "spark"\)/);
+    assert.equal(readFakeState(binDir)?.messages?.length ?? 0, 0);
   } finally {
     cleanupServer(repo, env);
   }
