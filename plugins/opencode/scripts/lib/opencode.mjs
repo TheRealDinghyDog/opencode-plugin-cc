@@ -30,7 +30,6 @@ import { binaryAvailable, runCommandChecked } from "./process.mjs";
 const TASK_SESSION_PREFIX = "OpenCode Companion Task";
 const DEFAULT_CONTINUE_PROMPT =
   "Continue from the current session state. Pick the next highest-value step and follow through until the task is resolved.";
-const MODEL_ALIASES = new Map([["spark", "openai/gpt-5.3-codex-spark"]]);
 const WRITE_AGENT = "build";
 const READ_ONLY_AGENT = "plan";
 // A turn is normally completed by a `session.idle` event. This is only a
@@ -108,19 +107,20 @@ function normalizeModelSelection(model) {
     return null;
   }
 
-  const normalized = MODEL_ALIASES.get(raw.toLowerCase()) ?? raw;
-  const slashIndex = normalized.indexOf("/");
-  if (slashIndex > 0 && slashIndex < normalized.length - 1) {
+  const slashIndex = raw.indexOf("/");
+  if (slashIndex > 0 && slashIndex < raw.length - 1) {
     return {
-      providerID: normalized.slice(0, slashIndex),
-      modelID: normalized.slice(slashIndex + 1)
+      providerID: raw.slice(0, slashIndex),
+      modelID: raw.slice(slashIndex + 1)
     };
   }
 
-  // OpenCode requires both providerID and modelID. Without a `provider/model`
-  // form we cannot build a valid selection, so fall back to the server default
-  // rather than sending an invalid model object the API would reject.
-  return null;
+  // OpenCode needs both providerID and modelID. A bare name used to fall back
+  // to the default model without a word, which hid typos and the removed
+  // Codex-era model alias (issue #97); say what the value must look like instead.
+  throw new Error(
+    `--model needs the provider/model form, such as deepseek/deepseek-flash (got "${raw}"). Run \`opencode models\` to list the available ones.`
+  );
 }
 
 function buildTaskSessionName(prompt) {
@@ -1290,9 +1290,6 @@ function buildAuthStatus(fields = {}) {
     loggedIn: false,
     detail: "not authenticated",
     source: "unknown",
-    authMethod: null,
-    verified: null,
-    requiresOpenaiAuth: null,
     provider: null,
     ...fields
   };
@@ -1883,7 +1880,7 @@ export async function runServerTurn(cwd, options = {}) {
     throw new Error(availabilityErrorMessage(availability));
   }
 
-  const write = Boolean(options.write ?? options.sandbox === "workspace-write");
+  const write = Boolean(options.write);
   const agent = options.agent ?? (write ? WRITE_AGENT : READ_ONLY_AGENT);
   const prompt = options.prompt || options.defaultPrompt || "";
   if (!prompt.trim()) {
@@ -2012,7 +2009,7 @@ export async function runServerReview(cwd, options = {}) {
   const result = await runServerTurn(cwd, {
     ...options,
     agent: READ_ONLY_AGENT,
-    sandbox: "read-only",
+    write: false,
     // Review sessions intentionally remain in OpenCode's session store so
     // users can reopen them with `opencode --session <id>`.
     taskSessionTitle: false,

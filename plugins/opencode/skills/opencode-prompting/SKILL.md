@@ -1,5 +1,5 @@
 ---
-name: gpt-5-4-prompting
+name: opencode-prompting
 description: Internal guidance for composing provider-neutral OpenCode prompts for coding, review, diagnosis, and research tasks inside the OpenCode Claude Code plugin
 user-invocable: false
 ---

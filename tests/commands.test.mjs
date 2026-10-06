@@ -37,7 +37,6 @@ test("rescue command routes through the renamed OpenCode subagent", () => {
   assert.match(rescue, /subagent_type: "opencode:opencode-rescue"/);
   assert.match(rescue, /do not call `Skill\(opencode:opencode-rescue\)`/i);
   assert.match(rescue, /task-resume-candidate --json/);
-  assert.match(rescue, /openai\/gpt-5\.3-codex-spark/);
   assert.match(agent, /name: opencode-rescue/);
   assert.match(agent, /opencode-companion\.mjs" task/);
   assert.match(agent, /thin forwarding wrapper/i);
@@ -160,4 +159,21 @@ test("review commands rely on Claude Code's built-in read-only git approval", ()
     assert.match(source, /git status --short --untracked-files=all/, file);
     assert.ok(!allowedTools(source).some((tool) => tool.startsWith("Bash(git")), file);
   }
+});
+
+// Issue #97: leftovers from the Codex plugin the conversion started from. The
+// provenance (README, NOTICE) and the guards above mention Codex on purpose.
+test("the plugin carries no Codex or GPT-era names", () => {
+  const leftovers = /gpt-5-4-prompting|codex-spark|\bspark\b|requiresOpenaiAuth|workspace-write|xhigh/;
+  const walk = (dir) =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(dir, entry.name);
+      return entry.isDirectory() ? walk(full) : [full];
+    });
+  const offenders = walk(PLUGIN_ROOT)
+    .filter((file) => /\.(md|mjs|json)$/.test(file) && !/NOTICE|CHANGELOG/.test(file))
+    .filter((file) => leftovers.test(fs.readFileSync(file, "utf8")))
+    .map((file) => path.relative(PLUGIN_ROOT, file));
+  assert.deepEqual(offenders, []);
+  assert.ok(fs.existsSync(path.join(PLUGIN_ROOT, "skills", "opencode-prompting", "SKILL.md")));
 });
