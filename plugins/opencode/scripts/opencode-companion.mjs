@@ -73,7 +73,6 @@ const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const REVIEW_SCHEMA = path.join(ROOT_DIR, "schemas", "review-output.schema.json");
 const DEFAULT_STATUS_WAIT_TIMEOUT_MS = 240000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
-const MODEL_ALIASES = new Map([["spark", "openai/gpt-5.3-codex-spark"]]);
 
 function printUsage() {
   console.log(
@@ -82,7 +81,7 @@ function printUsage() {
       "  node scripts/opencode-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/opencode-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
       "  node scripts/opencode-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
-      "  node scripts/opencode-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <provider/model|spark>] [--effort <variant>] [prompt]",
+      "  node scripts/opencode-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <provider/model>] [--effort <variant>] [prompt]",
       "  node scripts/opencode-companion.mjs transfer [--source <claude-jsonl>] [--json]",
       "  node scripts/opencode-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/opencode-companion.mjs result [job-id] [--json]",
@@ -111,7 +110,7 @@ function normalizeRequestedModel(model) {
   if (!normalized) {
     return null;
   }
-  return MODEL_ALIASES.get(normalized.toLowerCase()) ?? normalized;
+  return normalized;
 }
 
 function normalizeReasoningEffort(effort) {
@@ -439,7 +438,6 @@ async function executeTaskRun(request) {
     model: request.model,
     variant: request.effort,
     write: request.write,
-    sandbox: request.write ? "workspace-write" : "read-only",
     onProgress: request.onProgress,
     taskSessionTitle: true,
     threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)

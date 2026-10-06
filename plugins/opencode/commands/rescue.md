@@ -1,6 +1,6 @@
 ---
 description: Delegate investigation, an explicit fix request, or follow-up rescue work to the OpenCode rescue subagent
-argument-hint: "[--background|--wait] [--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [what OpenCode should investigate, solve, or continue]"
+argument-hint: "[--background|--wait] [--resume|--fresh] [--model <provider/model>] [--effort <variant>] [what OpenCode should investigate, solve, or continue]"
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" *), AskUserQuestion, Agent
 ---
 
@@ -48,7 +48,7 @@ Operating rules:
 - Do not paraphrase, summarize, rewrite, or add commentary before or after it.
 - Do not ask the subagent to inspect files, monitor progress, poll `/opencode:status`, fetch `/opencode:result`, call `/opencode:cancel`, summarize output, or do follow-up work of its own.
 - Leave `--effort` unset unless the user explicitly asks for a specific reasoning effort.
-- Leave the model unset unless the user explicitly asks for one. If they ask for `spark`, map it to `openai/gpt-5.3-codex-spark`.
+- Leave the model unset unless the user explicitly asks for one.
 - Leave `--resume` and `--fresh` in the forwarded request. The subagent handles that routing when it builds the `task` command.
 - If the helper reports that OpenCode is missing or unauthenticated, stop and tell the user to run `/opencode:setup`.
 - If the user did not supply a request, ask what OpenCode should investigate or fix.
