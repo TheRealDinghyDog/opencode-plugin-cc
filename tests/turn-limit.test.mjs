@@ -219,3 +219,60 @@ test("a 1.x turn with streamed text ends when the server's latest step finishes"
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+// Issue #93: the stream drops before any text arrives, and the held-open
+// response is gone too. Recovery must not end the turn on a step that went on
+// to call tools; it waits for the turn's latest step to finish.
+test("a 1.x turn recovered before any text ignores a tool-calls step's narration", async () => {
+  const sessionID = "ses_quiet";
+  let gets = 0;
+  const step = (id, finish, text) => ({
+    info: { id, role: "assistant", sessionID, finish, time: { created: 1, completed: 2 } },
+    parts: [{ id: `prt_${id}`, sessionID, messageID: id, type: "text", text }]
+  });
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, "http://127.0.0.1");
+    if (req.method === "GET" && url.pathname === "/event") {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(":ok\n\n");
+      setTimeout(() => res.destroy(), 100);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === `/session/${sessionID}/message`) {
+      gets += 1;
+      // The first read is the snapshot of earlier messages, taken before the prompt.
+      const messages =
+        gets === 1
+          ? []
+          : gets <= 4
+            ? [step("msg_q1", "tool-calls", "I'll look into it.")]
+            : [step("msg_q1", "tool-calls", "I'll look into it."), step("msg_q2", "stop", "The final answer.")];
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(messages));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === `/session/${sessionID}/message`) {
+      setTimeout(() => res.destroy(), 150);
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const client = new OpencodeServerClient(`http://127.0.0.1:${server.address().port}`);
+  try {
+    const state = await Promise.race([
+      captureTurnForTest(
+        client,
+        sessionID,
+        (signal) => client.sendMessage(sessionID, { parts: [{ type: "text", text: "go" }] }, { signal }),
+        FAST
+      ),
+      new Promise((resolve, reject) => setTimeout(() => reject(new Error("the turn never ended")), 10_000).unref())
+    ]);
+    assert.equal(state.error ?? null, null);
+    assert.equal(state.finalMessage, "The final answer.");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
