@@ -7,6 +7,38 @@ The plugin holds instructions only. Its commands tell Claude which `opencode` co
 > [!NOTE]
 > This is an independent community project. It is not affiliated with or endorsed by the OpenCode project, Anthropic, or OpenAI.
 
+> [!WARNING]
+> **2.0.0 is a breaking release. Read this before you update.**
+>
+> - **Why it changed.** Since November 2026, Anthropic's plugin directory accepts only instruction files from community publishers. Scripts, hooks and pre-approved shell access are refused. To stay in the directory, the plugin was rebuilt as instructions only: it no longer ships any code.
+> - **What still works.** Review, adversarial review, rescue, status, result, cancel and setup, on OpenCode 1.x and 2.x (tested with 1.19.5 and 2.2.7).
+> - **What was retired.** The stop-time review gate, `/opencode:transfer` and the `opencode-rescue` subagent. They need code or hooks.
+> - **What behaves differently.** Claude Code asks for permission before each OpenCode run. A review comes back as a Markdown report, no longer as JSON checked against a schema. Status, result and cancel read Claude Code's background tasks and OpenCode's own sessions; the plugin keeps no job records, and on OpenCode 1.x a background run ends with the Claude Code session that started it.
+> - **The directory is behind.** As of November 2026 it still serves 1.0.0, which does not work with OpenCode 2.x. Every later version, 2.0.0 included, waits for a manual release by Anthropic's directory team, and there is no date for that.
+
+### Installing without the directory
+
+You don't have to wait for the directory. Both versions install straight from this repository. They share the name `opencode` and the `/opencode:` commands, so use one of them, not both.
+
+**2.0.0, instructions only** (this branch):
+
+```bash
+/plugin marketplace add TheRealDinghyDog/opencode-plugin-cc
+/plugin install opencode@opencode
+```
+
+**1.1.1, the last version with code**, if you need the review gate, transfer or the rescue subagent. It lives on the [`full`](../../tree/full) branch and is outside the directory's review:
+
+```bash
+/plugin marketplace add TheRealDinghyDog/opencode-plugin-cc#full
+/plugin install opencode@opencode
+```
+
+Before you switch:
+
+- If you installed the plugin from Anthropic's plugin directory, uninstall that copy in `/plugin` first.
+- Claude Code keeps one marketplace per name, so to move between the two lines above run `/plugin marketplace remove opencode` first. That uninstalls the plugin and deletes its saved data.
+
 ## What You Get
 
 - `/opencode:review` for a read-only OpenCode review
