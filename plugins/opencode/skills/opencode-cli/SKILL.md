@@ -41,7 +41,7 @@ This plugin has no code of its own. Its commands tell Claude to run the user's `
 - The run lasts as long as the command. In Claude Code, set the `Bash` timeout to 600000 for a foreground run, and use `run_in_background: true` for anything that may take longer. A command that is stopped normally interrupts its run.
 - On 2.x the session lives in OpenCode's background service. If the command is killed hard, or runs into a time limit, the session can keep running; check it with the session details call and interrupt it before you send it anything else.
 - On 1.x each run starts its own OpenCode and ends with it.
-- The `plan` agent has its edit tools denied and is told to change nothing; in tests on 1.19.5 and 2.2.7 it also refused a shell command that would create a file. It is not a sandbox. The `build` agent can edit files inside the project. A session keeps the agent of its last run, so name the agent on every run.
+- The `plan` agent has its edit tools denied and is told to change nothing. That is an instruction, not a lock: it can still run shell commands, and in a test on 2.2.7 a prompt that asked it to create a file with a shell command got the file created. Treat a `plan` run as read-only by intent, and check the working tree after a review. The `build` agent can edit files inside the project. A session keeps the agent of its last run, so name the agent on every run.
 - Sessions this plugin starts have a title that begins with `Claude Code task:`, `Claude Code review:` or `Claude Code adversarial review:`, which is how the status, result and cancel commands find them. Titles are not unique, so ask before stopping one of two sessions with the same title.
 
 ## PowerShell

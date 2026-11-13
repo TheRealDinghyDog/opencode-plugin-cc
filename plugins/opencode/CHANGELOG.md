@@ -8,7 +8,7 @@ The plugin directory now accepts only instruction files (Markdown, text, JSON, Y
 
 - **No code in the plugin.** The companion runtime, the hooks and the pre-approved shell access are gone. Each command tells Claude to run your own `opencode` CLI, and Claude Code asks before each run.
 - **Works on OpenCode 1.x and 2.x.** The commands use the CLI options both versions share and name the few that differ.
-- **Reviews** use OpenCode's `plan` agent, whose edit tools are denied, and which collects the diff itself. The result is a Markdown report with a verdict, findings by severity and next steps.
+- **Reviews** use OpenCode's `plan` agent, whose edit tools are denied, and which collects the diff itself. The agent can still run shell commands, so the review commands compare the working tree before and after and report any change. The result is a Markdown report with a verdict, findings by severity and next steps.
 - **Tasks** (`/opencode:rescue`) run in the foreground or as a Claude Code background task, and can continue an earlier session, read-only or write-capable.
 - **Status, result and cancel** read Claude Code's background tasks and OpenCode's own session list. On 2.x, status and cancel also ask OpenCode's background service whether a session is running, and cancel can interrupt it.
 - **Not in this edition:** the stop-time review gate, `/opencode:transfer`, and the `opencode-rescue` subagent. They need code or hooks. The full plugin still has them; see the repository README.

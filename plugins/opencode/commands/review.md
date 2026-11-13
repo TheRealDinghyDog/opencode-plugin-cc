@@ -15,6 +15,7 @@ $ARGUMENTS
 ## Core constraint
 
 - This command is review-only. Do not fix issues, apply patches, or say you are about to make changes.
+- Never call the review "guaranteed read-only". OpenCode is told to change nothing and its edit tools are blocked, and you check the working tree afterwards.
 - Your only job is to run the review and return OpenCode's answer verbatim.
 
 ## Rules for every OpenCode call
@@ -118,6 +119,14 @@ OPENCODE_PROMPT
 ```
 
 Background: the same command in one `Bash` call with `run_in_background: true`. Do not wait for it in this turn. Tell the user: "OpenCode review started in the background. I'll show the result when it finishes. `/opencode:status` shows progress."
+
+## Check that nothing changed
+
+A review is read-only by instruction, not by force. OpenCode blocks the `plan` agent's edit tools, but the agent can still run shell commands, and on OpenCode 2.x nothing stops one that writes a file.
+
+- Before you start the run, foreground or background, note the output of `git status --short --untracked-files=all` and of `git diff --shortstat HEAD`.
+- When the run has finished, run both again.
+- If either differs, say so before the review itself: name the files that changed while the review ran and tell the user to inspect them with `git diff`. Do not revert or fix anything yourself.
 
 ## Present the result
 

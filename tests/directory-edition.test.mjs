@@ -181,6 +181,20 @@ test("review commands are read-only by construction", () => {
   }
 });
 
+test("review commands check the working tree before and after the run", () => {
+  // The plan agent's edit tools are blocked, but its shell is not (measured on
+  // OpenCode 2.2.7), so a review is read-only by instruction only.
+  for (const name of ["review", "adversarial-review"]) {
+    const source = read(`commands/${name}.md`);
+    assert.match(source, /^## Check that nothing changed$/m, name);
+    assert.match(source, /read-only by instruction, not by force/, name);
+    assert.match(source, /git status --short --untracked-files=all` and of `git diff --shortstat HEAD`/, name);
+    assert.ok(source.indexOf("## Check that nothing changed") < source.indexOf("## Present the result"), name);
+  }
+  assert.match(read("commands/setup.md"), /read-only by instruction, not by force/);
+  assert.match(read("README.md"), /read-only by instruction, not by force/);
+});
+
 test("every opencode run names its agent first, and never auto-approves", () => {
   for (const name of COMMANDS) {
     const source = read(`commands/${name}.md`);

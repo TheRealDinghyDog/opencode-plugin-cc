@@ -31,12 +31,12 @@ Reviews and tasks can run in the foreground or as a Claude Code background task 
 
 Every `opencode` command line the plugin uses is listed in `skills/opencode-cli/SKILL.md`. In short: `opencode --version`, `opencode auth list`, `opencode run` with the prompt on standard input, `opencode session list`, and on OpenCode 2.x `opencode api` to read or interrupt a session and `opencode session export` (`opencode export` on 1.x). `/opencode:setup` offers `npm install -g opencode-ai` if OpenCode is missing, and asks first.
 
-- Reviews run OpenCode's `plan` agent, whose edit tools are denied and which is told to change nothing.
+- Reviews run OpenCode's `plan` agent, whose edit tools are denied and which is told to change nothing. That makes a review read-only by instruction, not by force: the agent can still run shell commands. After each review the plugin compares `git status` and the diff size with what they were before, and tells you if anything changed.
 - Tasks run its `build` agent, which can edit files in the project, unless you ask for read-only.
 - The plugin never passes `--auto`, so OpenCode rejects any permission request it would otherwise ask you about, such as reading `.env` or touching files outside the project.
 - OpenCode permissions are approval-level controls, not an operating-system sandbox.
 
-Each run shows Claude Code's permission prompt. To allow read-only runs for good, add `Bash(opencode run --agent plan *)` to `permissions.allow` in your Claude Code settings. The rule also allows any further flags on that line; the plugin never adds `--auto`.
+Each run shows Claude Code's permission prompt. To stop the prompt for reviews and read-only runs, add `Bash(opencode run --agent plan *)` to `permissions.allow` in your Claude Code settings. Weigh that against the point above: with the rule in place, the prompt no longer stands between a review and your shell. The rule also allows any further flags on that line; the plugin never adds `--auto`.
 
 ## Data
 
