@@ -21,26 +21,28 @@ This plugin has no code of its own. Its commands tell Claude to run the user's `
 | - | - | - |
 | Version | `opencode --version` | same |
 | Logins | `opencode auth list` | same |
+| Log in (the user runs it; it is interactive) | `opencode auth login` | same |
 | Read-only run | `opencode run --agent plan --title "<title>"` | same |
 | Write-capable run | `opencode run --agent build --title "<title>"` | same |
 | Continue a session | `opencode run --agent build --session <session id>`, or `--agent plan` for read-only | same |
 | Choose a model | `--model <provider/model>` | same |
-| Choose an effort | `--variant <variant>` | `--model <provider/model>#<variant>` |
+| Choose an effort | `--variant <variant>` | `--model "<provider/model>#<variant>"`, quoted because of the `#` |
 | List sessions | `opencode session list -n 10` | same |
 | Running sessions | not available | `opencode api session.active` |
 | Session details | not available | `opencode api session.get --param sessionID=<session id>` |
 | Interrupt a session | stop the command that runs it | `opencode api session.interrupt --param sessionID=<session id>` |
 | Export a session | `opencode export <session id>` | `opencode session export <session id>` |
+| Open a session in OpenCode (the user runs it) | `opencode --session <session id>` | same |
 
 ## How a run behaves
 
-- `opencode run` prints progress and then the answer. Progress lines start with a marker: `>` for the agent and model, `$` for a shell command, `→` for a read, `←` for an edit, `✱` for a search, `✗` for a failed step, and an exclamation mark for a permission request that was rejected. The answer is the text after the last of those.
-- The run lasts as long as the command. In Claude Code, set the `Bash` timeout to 600000 for a foreground run, and use `run_in_background: true` for anything that may take longer. A command that is stopped interrupts its run.
-- On 2.x the session lives in OpenCode's background service. If the command is killed hard, the session can keep running; check it with the session details call and interrupt it.
+- `opencode run` prints progress and then the answer. Progress lines start with a marker: `>` for the agent and model, `$` for a shell command, `→` for a read, `←` for an edit, `✱` for a search, `✗` for a failed step, and an exclamation mark for a permission request that was rejected. The answer is the text after the last of those. Lines inside the answer itself, such as a Markdown quote that starts with `>`, belong to the answer.
+- The run lasts as long as the command. In Claude Code, set the `Bash` timeout to 600000 for a foreground run, and use `run_in_background: true` for anything that may take longer. A command that is stopped normally interrupts its run.
+- On 2.x the session lives in OpenCode's background service. If the command is killed hard, or runs into a time limit, the session can keep running; check it with the session details call and interrupt it before you send it anything else.
 - On 1.x each run starts its own OpenCode and ends with it.
-- The `plan` agent cannot edit files. The `build` agent can edit files inside the project. A session keeps the agent of its last run, so name the agent on every run.
-- Sessions this plugin starts have a title that begins with `Claude Code`, which is how the status, result and cancel commands find them.
+- The `plan` agent has its edit tools denied and is told to change nothing; in tests on 1.19.5 and 2.2.7 it also refused a shell command that would create a file. It is not a sandbox. The `build` agent can edit files inside the project. A session keeps the agent of its last run, so name the agent on every run.
+- Sessions this plugin starts have a title that begins with `Claude Code task:`, `Claude Code review:` or `Claude Code adversarial review:`, which is how the status, result and cancel commands find them. Titles are not unique, so ask before stopping one of two sessions with the same title.
 
 ## PowerShell
 
-Where the shell is PowerShell, replace the here-document with a single-quoted here-string piped to the same command: start it with a line holding an at sign and a single quote, end it with a line holding a single quote and an at sign, then `| opencode run ...`.
+Where the shell is PowerShell, replace the here-document with a single-quoted here-string piped to the same command: start it with a line holding an at sign and a single quote, end it with a line holding a single quote and an at sign, then `| opencode run ...`. A here-string ends at the first line that starts with a single quote and an at sign, so if a prompt line starts that way, put a space before it.

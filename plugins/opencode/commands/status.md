@@ -9,12 +9,13 @@ Show the state of OpenCode runs this plugin started, using Claude Code's own bac
 This command needs Claude Code on a machine where OpenCode is installed. If you have no shell tool here, say so and stop.
 
 Raw slash-command arguments:
-`$ARGUMENTS`
+$ARGUMENTS
 
 ## Rules for every OpenCode call
 
 - Use only the `opencode` invocations written in this file. If one fails with an unknown option or an unknown command, or prints OpenCode's help text instead of doing what was asked, stop: show the user the exact output and the output of `opencode --version`, and say the plugin may not support that OpenCode version yet. Do not try other flags or subcommands.
 - This command only reads. Do not start, continue, stop or delete anything.
+- Check values before they go on a command line. A session ID has only letters, digits, `_` and `-`. A git ref, model or variant has only letters, digits and `/ . _ - : @ ~ ^`. If a value has anything else, say so and stop.
 - If `opencode` is not installed, stop and tell the user to run `/opencode:setup`.
 
 ## Collect
@@ -26,21 +27,21 @@ Raw slash-command arguments:
 opencode session list -n 10
 ```
 
-   Keep the sessions whose title starts with `Claude Code`. Those were started by this plugin.
+   Keep the sessions whose title starts with `Claude Code task:`, `Claude Code review:` or `Claude Code adversarial review:`. Those were started by this plugin.
 3. Find the major version with `opencode --version`. On 2.x only, ask the OpenCode service which sessions are running:
 
 ```bash
 opencode api session.active
 ```
 
-   If the user passed a session ID, also get its details on 2.x:
+   Then get the details of the session the user passed, or, without one, of each kept session that is not running (the five newest at most):
 
 ```bash
 opencode api session.get --param sessionID=<session id>
 ```
 
-   In that answer, a `time.busy` value with no `outcome` means the session is running. `outcome` says how the last run ended, and `cost` and `tokens` give its usage.
-4. On 1.x there is no service to ask. A run is known to be running only when it is one of your background tasks from step 1; say `unknown` for the others instead of guessing.
+   In that answer, a `time.busy` value with no `outcome` means the session is running. `outcome` says how the last run ended, for example `interrupted`, and `cost` and `tokens` give its usage.
+4. On 1.x there is no service to ask. A run is known to be running, finished or stopped only when it is one of your background tasks from step 1; say `unknown` for the others instead of guessing.
 
 ## Present
 

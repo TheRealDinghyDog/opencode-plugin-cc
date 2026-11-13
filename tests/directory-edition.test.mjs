@@ -203,6 +203,32 @@ test("every command carries the stop rule for an unsupported CLI", () => {
   }
 });
 
+test("no command puts the raw arguments inside a code span", () => {
+  // An argument that ends in an exclamation mark would sit directly before
+  // the closing backtick, which Claude Code can read as the start of inline
+  // shell.
+  for (const name of COMMANDS) {
+    assert.doesNotMatch(read(`commands/${name}.md`), /`[^`\n]*\$ARGUMENTS[^`\n]*`/, name);
+  }
+});
+
+test("status, result and cancel find the plugin's sessions by their full title prefixes", () => {
+  const prefixes = "`Claude Code task:`, `Claude Code review:` or `Claude Code adversarial review:`";
+  for (const name of ["status", "result", "cancel"]) {
+    assert.ok(read(`commands/${name}.md`).includes(prefixes), name);
+  }
+  assert.match(read("commands/review.md"), /--title "Claude Code review: /);
+  assert.match(read("commands/adversarial-review.md"), /--title "Claude Code adversarial review: /);
+  assert.match(read("commands/rescue.md"), /--title "Claude Code task: /);
+});
+
+test("rescue never continues a review session and keeps the earlier agent", () => {
+  const rescue = read("commands/rescue.md");
+  assert.match(rescue, /Never continue a session whose title starts with `Claude Code review:`/);
+  assert.match(rescue, /keep the agent of the run you are continuing/);
+  assert.match(rescue, /Skip a session whose background task in this conversation is still running/);
+});
+
 test("every opencode command line in the edition is in the CLI contract", () => {
   assert.deepEqual(checkCliContract(EDITION), []);
 });

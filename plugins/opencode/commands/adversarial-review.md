@@ -10,7 +10,7 @@ Run an adversarial OpenCode review of local git changes by calling the user's ow
 This command needs Claude Code on a machine where OpenCode is installed. If you have no shell tool here, say so and stop.
 
 Raw slash-command arguments:
-`$ARGUMENTS`
+$ARGUMENTS
 
 ## Core constraint
 
@@ -23,6 +23,7 @@ Raw slash-command arguments:
 - Never add `--auto`. In these non-interactive runs OpenCode rejects any permission request it would otherwise ask about, and that is intended.
 - Pass the prompt on standard input with a quoted here-document, exactly as shown, so the shell expands nothing in it. If the prompt contains a line that reads `OPENCODE_PROMPT`, use another delimiter. In PowerShell, pipe a single-quoted here-string to the same command instead.
 - A title is plain words: letters, digits, spaces, `-`, `.` and `:` only.
+- Check values before they go on a command line. A session ID has only letters, digits, `_` and `-`. A git ref, model or variant has only letters, digits and `/ . _ - : @ ~ ^`. If a value has anything else, say so and stop.
 - If `opencode` is not installed or not logged in, stop and tell the user to run `/opencode:setup`.
 
 ## Choose the target and the focus
@@ -135,7 +136,7 @@ Background: the same command in one `Bash` call with `run_in_background: true`. 
 
 ## Present the result
 
-- OpenCode prints progress first: lines that start with a marker (`>`, `$`, `→`, `←`, `✱`, `✗`, or an exclamation mark for a permission notice), and the output of the commands it ran. Its answer is the text after the last of those.
+- OpenCode prints progress first: lines that start with a marker (`>`, `$`, `→`, `←`, `✱`, `✗`, or an exclamation mark for a permission notice), and the output of the commands it ran. Its answer is the text after the last of those. Lines inside the answer itself, such as a Markdown quote that starts with `>` or a `$` line in a code block, belong to the answer.
 - Return the answer verbatim. Do not paraphrase, summarize, or add commentary before or after it.
-- If there is no answer, or the run failed or timed out, show the last progress and error lines and stop. A foreground run that hit the time limit was interrupted; suggest `--background`.
+- If there is no answer, or the run failed or timed out, show the last progress and error lines and stop. A foreground run that hit the time limit was stopped; suggest `--background`. On OpenCode 2.x the session can keep running in OpenCode's service after that: tell the user that `/opencode:status` shows it and `/opencode:cancel <session id>` stops it.
 - Do not fix any issue the review mentions. Ask the user which findings, if any, they want fixed before touching a file.

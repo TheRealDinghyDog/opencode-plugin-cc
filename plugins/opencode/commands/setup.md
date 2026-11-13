@@ -7,7 +7,7 @@ Check that the user's own `opencode` CLI is ready for this plugin.
 This command needs Claude Code on a machine where OpenCode can be installed. If you have no shell tool here, say so and stop.
 
 Raw slash-command arguments:
-`$ARGUMENTS`
+$ARGUMENTS
 
 If the arguments mention `--enable-review-gate` or `--disable-review-gate`: say that the stop-time review gate is part of the full plugin, not this edition, point to https://github.com/TheRealDinghyDog/opencode-plugin-cc#editions, and continue with the checks.
 
@@ -42,7 +42,7 @@ npm install -g opencode-ai
 opencode auth list
 ```
 
-- If no credential is listed, OpenCode cannot run a model. Tell the user to log in from their own terminal with `opencode auth login`, which is interactive, and to run `/opencode:setup` again afterwards.
+- If no credential is listed, the plugin cannot confirm that OpenCode can reach a model. A provider set up through an environment variable or a local server may still work. Tell the user to log in from their own terminal with `opencode auth login`, which is interactive, and to run `/opencode:setup` again afterwards.
 - OpenCode 1.x and 2.x keep separate logins. A login made in one does not appear in the other.
 
 ## Report
@@ -52,4 +52,4 @@ Tell the user, briefly:
 - the OpenCode version and whether it is supported,
 - the providers that are logged in, by name,
 - whether the plugin is ready, and if not, the one thing to do next,
-- that each OpenCode run asks for permission, and that they can allow read-only runs for good by adding `Bash(opencode run --agent plan *)` to the `permissions.allow` list in their own Claude Code settings (`Bash(opencode run --agent build *)` does the same for runs that can edit files). Do not edit their settings yourself.
+- that each OpenCode run asks for permission, and that they can allow read-only runs for good by adding `Bash(opencode run --agent plan *)` to the `permissions.allow` list in their own Claude Code settings (`Bash(opencode run --agent build *)` does the same for runs that can edit files). Such a rule also allows any further flags on that line; the plugin never adds `--auto`. Do not edit their settings yourself.

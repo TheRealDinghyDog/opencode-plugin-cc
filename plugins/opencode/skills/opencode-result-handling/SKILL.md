@@ -8,7 +8,7 @@ user-invocable: false
 
 When an `opencode run` returns:
 - The answer is the text after the last progress line. Return it verbatim, and keep its verdict, summary, findings and next-steps structure.
-- For review output, present findings first and keep them ordered by severity.
+- For review output, keep OpenCode's order: verdict, summary, findings by severity, next steps.
 - Use the file paths and line numbers exactly as OpenCode reports them.
 - Preserve evidence boundaries. If OpenCode marked something as an inference, uncertainty, or follow-up question, keep that distinction.
 - If there are no findings, say that explicitly and keep the residual-risk note brief.
@@ -19,4 +19,4 @@ When an `opencode run` returns:
 - If the run failed, include the most actionable error lines and stop there instead of guessing.
 - If OpenCode is missing or not logged in, direct the user to `/opencode:setup` and do not improvise another login flow.
 - If a command fails with an unknown option, or prints OpenCode's help text instead of doing what was asked, show the output and the OpenCode version and stop. Do not try other flags.
-- If OpenCode's answer is a question, answer it when the conversation makes the answer clear: continue the session with `/opencode:rescue --resume <answer>` and tell the user what you answered. Otherwise ask the user and continue with their answer. Never answer on the user's behalf when the answer changes scope or risk.
+- If OpenCode's answer is a question, answer it when the conversation makes the answer clear: continue the same session, with the same agent as the run that asked, and tell the user what you answered. Otherwise ask the user and continue with their answer. Never answer on the user's behalf when the answer changes scope or risk.

@@ -31,7 +31,7 @@ When to add blocks:
 - Write-capable tasks: add `action_safety` so OpenCode stays narrow and avoids unrelated refactors.
 
 How to choose prompt shape:
-- Use built-in `review` or `adversarial-review` commands when the job is reviewing local git changes. Those prompts already carry the review contract.
+- When the job is reviewing local git changes, point the user to `/opencode:review` or `/opencode:adversarial-review`. Only the user can start them, and their prompts already carry the review contract.
 - Use `/opencode:rescue` when the task is diagnosis, planning, research, or implementation and you need to control the prompt more directly.
 - Use `/opencode:rescue --resume` for follow-up instructions on the same OpenCode session. Send only the delta instruction instead of restating the whole prompt unless the direction changed materially.
 

@@ -9,12 +9,13 @@ Stop an OpenCode run this plugin started.
 This command needs Claude Code on a machine where OpenCode is installed. If you have no shell tool here, say so and stop.
 
 Raw slash-command arguments:
-`$ARGUMENTS`
+$ARGUMENTS
 
 ## Rules for every OpenCode call
 
 - Use only the `opencode` invocations written in this file. If one fails with an unknown option or an unknown command, or prints OpenCode's help text instead of doing what was asked, stop: show the user the exact output and the output of `opencode --version`, and say the plugin may not support that OpenCode version yet. Do not try other flags or subcommands.
-- Cancel only what the user asked for. Never delete a session, and never stop a session whose title does not start with `Claude Code` unless the user gave its ID.
+- Cancel only what the user asked for. Never delete a session, and never stop a session whose title does not start with `Claude Code task:`, `Claude Code review:` or `Claude Code adversarial review:` unless the user gave its ID.
+- Check values before they go on a command line. A session ID has only letters, digits, `_` and `-`. A git ref, model or variant has only letters, digits and `/ . _ - : @ ~ ^`. If a value has anything else, say so and stop.
 - If `opencode` is not installed, stop and tell the user to run `/opencode:setup`.
 
 ## Find the run
@@ -26,6 +27,8 @@ Raw slash-command arguments:
 ```bash
 opencode session list -n 10
 ```
+
+- If more than one listed session has that title, ask the user which one before you stop anything. Another Claude Code window on the same repository can have a run with the same title.
 
 ## Stop it
 
@@ -47,4 +50,4 @@ opencode api session.interrupt --param sessionID=<session id>
 
 ## Report
 
-Say in one or two lines which session was cancelled and its state now. Mention that the session and whatever files it already changed are kept, and that `/opencode:rescue --resume` can continue it.
+Say in one or two lines which session was cancelled and its state now. Mention that the session and whatever files it already changed are kept. For a task, add that `/opencode:rescue --resume` can continue it. A cancelled review is run again with its review command.
