@@ -1,0 +1,51 @@
+{
+  "description": "Every opencode command line the directory edition (plugins/opencode) tells Claude to run. tests/directory-edition.test.mjs checks the edition's Markdown against this file, and the canary checks this file against the real CLI's --help on each channel.",
+  "commands": {
+    "opencode": {
+      "majors": [1, 2],
+      "flags": {
+        "--version": [1, 2],
+        "--session": [1, 2]
+      }
+    },
+    "opencode run": {
+      "majors": [1, 2],
+      "flags": {
+        "--agent": [1, 2],
+        "--title": [1, 2],
+        "--session": [1, 2],
+        "--model": [1, 2],
+        "--variant": [1]
+      }
+    },
+    "opencode auth list": {
+      "majors": [1, 2],
+      "flags": {}
+    },
+    "opencode auth login": {
+      "majors": [1, 2],
+      "flags": {}
+    },
+    "opencode session list": {
+      "majors": [1, 2],
+      "flags": {
+        "-n": [1, 2]
+      }
+    },
+    "opencode session export": {
+      "majors": [2],
+      "flags": {}
+    },
+    "opencode export": {
+      "majors": [1],
+      "flags": {}
+    },
+    "opencode api": {
+      "majors": [2],
+      "flags": {
+        "--param": [2]
+      },
+      "operations": ["session.active", "session.get", "session.interrupt"]
+    }
+  }
+}

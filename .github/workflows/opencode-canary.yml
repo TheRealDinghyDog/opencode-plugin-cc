@@ -16,6 +16,8 @@ on:
       - scripts/opencode-canary.mjs
       - tests/opencode-event-contract.json
       - tests/opencode-v2-contract.json
+      - tests/opencode-cli-contract.json
+      - plugins/opencode/**
       - plugins/opencode-full/scripts/**
   workflow_dispatch:
     inputs:

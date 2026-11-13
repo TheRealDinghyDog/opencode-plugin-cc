@@ -29,6 +29,10 @@ const CONTRACT_FILES = {
   1: path.join(ROOT, "tests", "opencode-event-contract.json"),
   2: path.join(ROOT, "tests", "opencode-v2-contract.json")
 };
+// The command lines the directory edition (plugins/opencode) tells Claude to
+// run. That edition has no code, so the CLI's options are its whole contract
+// with OpenCode (issue #111).
+const CLI_CONTRACT_FILE = path.join(ROOT, "tests", "opencode-cli-contract.json");
 // `opencode` and `npm` are .cmd shims on Windows, which only a shell starts.
 const ON_WINDOWS = process.platform === "win32";
 const PLATFORM_NAMES = { linux: "Linux", darwin: "macOS", win32: "Windows" };
@@ -445,7 +449,7 @@ async function checkV1Server(server, contract, workspace, record) {
   record("1.x event stream", event.ok ? "pass" : "fail", event.detail);
 }
 
-async function checkV2Server(server, contract, workspace, record) {
+async function checkV2Server(server, contract, workspace, record, cliContract = null) {
   const info = await request(server, "GET", "/api/info");
   if (typeof info.json?.version === "string") {
     record("2.x info", "pass", `version ${info.json.version}`);
@@ -459,6 +463,14 @@ async function checkV2Server(server, contract, workspace, record) {
   } else {
     contractCheck(record, "2.x routes", diffRoutes(contract.routes, openapi.json));
     contractCheck(record, "2.x request bodies", diffV2Requests(contract.requests, openapi.json));
+    if (cliContract) {
+      const gone = missingApiOperations(cliContract, openapi.json);
+      record(
+        "directory edition API operations",
+        gone.length > 0 ? "fail" : "pass",
+        gone.length > 0 ? `no longer in /openapi.json: ${gone.join(", ")}` : "all present in /openapi.json"
+      );
+    }
   }
 
   const created = await request(server, "POST", "/api/session", {
@@ -475,6 +487,86 @@ async function checkV2Server(server, contract, workspace, record) {
 
   const event = await firstEvent(server, "/api/event");
   record("2.x event stream", event.ok ? "pass" : "fail", event.detail);
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Pure part of the CLI check: given a command's --help text, list what the
+// contract expects for this major version and the help does not show.
+export function diffCliHelp(command, entry, major, helpText) {
+  const missing = [];
+  const usage = new RegExp(`(^|\\s)${escapeRegExp(command)}(\\s|$)`, "m");
+  if (command !== "opencode" && !usage.test(helpText)) {
+    missing.push(`${command}: --help does not describe this command`);
+    return missing;
+  }
+  for (const [flag, majors] of Object.entries(entry.flags ?? {})) {
+    if (!majors.includes(major)) {
+      continue;
+    }
+    if (!new RegExp(`(^|[\\s,])${escapeRegExp(flag)}([\\s,=]|$)`, "m").test(helpText)) {
+      missing.push(`${command}: no ${flag} option`);
+    }
+  }
+  return missing;
+}
+
+// Asks the installed CLI for the help of every command the directory edition
+// uses and compares it with the contract.
+function checkCliContract(versionInfo, workspace, env, record) {
+  const name = "directory edition CLI";
+  let contract;
+  try {
+    contract = JSON.parse(fs.readFileSync(CLI_CONTRACT_FILE, "utf8"));
+  } catch (error) {
+    record(name, "fail", `could not read the CLI contract: ${error.message}`);
+    return null;
+  }
+  const missing = [];
+  let checked = 0;
+  for (const [command, entry] of Object.entries(contract.commands)) {
+    if (!entry.majors.includes(versionInfo.major)) {
+      continue;
+    }
+    const args = [...command.split(" ").slice(1), "--help"];
+    const help = spawnSync("opencode", args, {
+      cwd: workspace,
+      env,
+      encoding: "utf8",
+      timeout: 30 * 1000,
+      shell: ON_WINDOWS
+    });
+    checked += 1;
+    if (help.error || help.status !== 0) {
+      missing.push(`${command}: --help failed (${help.error?.message ?? `exit ${help.status}`})`);
+      continue;
+    }
+    missing.push(...diffCliHelp(command, entry, versionInfo.major, `${help.stdout ?? ""}${help.stderr ?? ""}`));
+  }
+  if (checked === 0) {
+    record(name, "notice", `the CLI contract has no commands for OpenCode ${versionInfo.major}.x`);
+  } else if (missing.length > 0) {
+    record(name, "fail", summarizeFindings(missing));
+  } else {
+    record(name, "pass", `${checked} commands match the pinned options`);
+  }
+  return contract;
+}
+
+// `opencode api <operation>` takes an OpenAPI operation ID, so the edition's
+// status and cancel commands depend on these names.
+export function missingApiOperations(cliContract, openapi) {
+  const live = new Set();
+  for (const methods of Object.values(openapi?.paths ?? {})) {
+    for (const operation of Object.values(methods ?? {})) {
+      if (operation && typeof operation.operationId === "string") {
+        live.add(operation.operationId);
+      }
+    }
+  }
+  return (cliContract?.commands?.["opencode api"]?.operations ?? []).filter((operation) => !live.has(operation));
 }
 
 // A channel is only worth testing at its current release: GitHub's macOS
@@ -740,6 +832,7 @@ export async function runCanary(options = {}) {
       checkChannelFreshness(channel, versionInfo.version, record);
       const contractFile = CONTRACT_FILES[versionInfo.major];
       contract = contractFile ? JSON.parse(fs.readFileSync(contractFile, "utf8")) : null;
+      const cliContract = checkCliContract(versionInfo, workspace, env, record);
 
       const setupRun = runCompanion(["setup", "--json"], workspace, env, 2 * 60 * 1000);
       let setup = null;
@@ -756,7 +849,7 @@ export async function runCanary(options = {}) {
           if (versionInfo.major === 1) {
             await checkV1Server(server, contract, workspace, record);
           } else {
-            await checkV2Server(server, contract, workspace, record);
+            await checkV2Server(server, contract, workspace, record, cliContract);
           }
         } catch (error) {
           record("opencode serve", "fail", error instanceof Error ? error.message : String(error));

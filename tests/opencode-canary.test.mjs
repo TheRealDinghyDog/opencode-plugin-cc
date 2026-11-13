@@ -194,3 +194,43 @@ test("diffV2Requests catches dropped fields and newly required ones", () => {
     "POST /api/missing: no JSON request body"
   ]);
 });
+
+test("the CLI help diff reports a command or option the directory edition needs and the CLI lacks", async () => {
+  const { diffCliHelp, missingApiOperations } = await import("../scripts/opencode-canary.mjs");
+  const cli = require("./opencode-cli-contract.json");
+  const runHelp = [
+    "USAGE",
+    "  opencode run [flags] [<message...>]",
+    "FLAGS",
+    "  --session, -s string      Session ID to continue",
+    "  --model, -m string        Model to use",
+    "  --agent string            Agent to use",
+    "  --title string            Session title"
+  ].join("\n");
+
+  // 2.x has no --variant; the contract lists it for 1.x only.
+  assert.deepEqual(diffCliHelp("opencode run", cli.commands["opencode run"], 2, runHelp), []);
+  assert.deepEqual(diffCliHelp("opencode run", cli.commands["opencode run"], 1, runHelp), ["opencode run: no --variant option"]);
+  assert.deepEqual(diffCliHelp("opencode run", cli.commands["opencode run"], 2, runHelp.replace("--agent", "--persona")), [
+    "opencode run: no --agent option"
+  ]);
+  // An unknown subcommand prints the root help, which never names the command.
+  assert.deepEqual(
+    diffCliHelp("opencode session export", cli.commands["opencode session export"], 2, "USAGE\n  opencode <subcommand> [flags]"),
+    ["opencode session export: --help does not describe this command"]
+  );
+  assert.deepEqual(
+    diffCliHelp("opencode session list", cli.commands["opencode session list"], 2, "  opencode session list [flags]\n  --max-count, -n integer"),
+    []
+  );
+
+  const openapi = {
+    paths: {
+      "/api/session/active": { get: { operationId: "session.active" } },
+      "/api/session/{sessionID}": { get: { operationId: "session.get" } }
+    }
+  };
+  assert.deepEqual(missingApiOperations(cli, openapi), ["session.interrupt"]);
+  openapi.paths["/api/session/{sessionID}/interrupt"] = { post: { operationId: "session.interrupt" } };
+  assert.deepEqual(missingApiOperations(cli, openapi), []);
+});
