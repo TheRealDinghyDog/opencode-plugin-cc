@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 import {
-  diffRoutes,
-  diffV1Contract,
-  diffV2Requests,
-  extractV1Contract,
+  classifyRun,
+  diffCliHelp,
   failingIssueTitle,
+  missingApiOperations,
   newMajorIssueTitle,
+  parseVersion,
   planIssueActions,
   reportLabel,
   rollupStatus
@@ -16,106 +16,19 @@ import {
 
 const require = createRequire(import.meta.url);
 
-const pinned = {
-  events: {
-    "session.idle": {
-      required: ["id", "type", "properties"],
-      properties: { required: ["sessionID"], keys: ["sessionID"] }
-    }
-  },
-  objects: {
-    TextPart: { required: ["id", "text"], keys: ["id", "text", "synthetic"] }
-  }
-};
-
-function openapiDoc({ eventProperties, textPart, paths = {} } = {}) {
-  return {
-    paths,
-    components: {
-      schemas: {
-        Event: { anyOf: [{ $ref: "#/components/schemas/EventSessionIdle" }] },
-        EventSessionIdle: {
-          type: "object",
-          required: ["id", "type", "properties"],
-          properties: {
-            id: { type: "string" },
-            type: { type: "string", const: "session.idle" },
-            properties: eventProperties ?? {
-              type: "object",
-              required: ["sessionID"],
-              properties: { sessionID: { type: "string" } }
-            }
-          }
-        },
-        TextPart: textPart ?? {
-          type: "object",
-          required: ["id", "text"],
-          properties: { id: {}, text: {}, synthetic: {} }
-        }
-      }
-    }
-  };
-}
-
-test("extractV1Contract rebuilds the pinned shapes from an OpenAPI document", () => {
-  assert.deepEqual(extractV1Contract(openapiDoc(), pinned), {
-    events: pinned.events,
-    objects: pinned.objects
-  });
+test("parseVersion reads both the 1.x and the 2.x version line", () => {
+  assert.deepEqual(parseVersion("1.19.5\n"), { version: "1.19.5", major: 1 });
+  assert.deepEqual(parseVersion("opencode v2.2.7\n"), { version: "2.2.7", major: 2 });
+  assert.equal(parseVersion("command not found: opencode"), null);
 });
 
-test("the committed 1.x contract pins events, objects and routes", () => {
-  const contract = require("./opencode-event-contract.json");
-  assert.ok(Object.keys(contract.events).length > 0);
-  assert.ok(Object.keys(contract.objects).length > 0);
-  assert.ok(contract.routes.some((route) => route.path === "/global/health"));
-});
-
-test("diffV1Contract treats removed or no-longer-required keys as breaking", () => {
-  const live = extractV1Contract(
-    openapiDoc({
-      textPart: { type: "object", required: ["id"], properties: { id: {}, text: {} } }
-    }),
-    pinned
-  );
-  const findings = diffV1Contract(pinned, live);
-  assert.deepEqual(findings.breaking.sort(), [
-    'object TextPart: "synthetic" was removed',
-    'object TextPart: "text" is no longer required'
-  ]);
-});
-
-test("diffV1Contract treats new keys as additive, not breaking", () => {
-  const live = extractV1Contract(
-    openapiDoc({
-      eventProperties: {
-        type: "object",
-        required: ["sessionID", "reason"],
-        properties: { sessionID: {}, reason: {} }
-      }
-    }),
-    pinned
-  );
-  const findings = diffV1Contract(pinned, live);
-  assert.deepEqual(findings.breaking, []);
-  assert.deepEqual(findings.additive, ['event session.idle properties: new key "reason"']);
-});
-
-test("diffV1Contract reports a vanished event as breaking", () => {
-  const doc = openapiDoc();
-  doc.components.schemas.Event.anyOf = [];
-  const findings = diffV1Contract(pinned, extractV1Contract(doc, pinned));
-  assert.deepEqual(findings.breaking, ["event session.idle no longer exists"]);
-});
-
-test("diffRoutes ignores path parameter names but catches missing routes", () => {
-  const doc = { paths: { "/session/{id}": { delete: {} }, "/event": { get: {} } } };
-  const routes = [
-    { method: "DELETE", path: "/session/{sessionID}" },
-    { method: "GET", path: "/event" },
-    { method: "POST", path: "/session/{sessionID}/abort" }
-  ];
-  assert.deepEqual(diffRoutes(routes, doc).breaking, ["route POST /session/{sessionID}/abort is missing"]);
+test("classifyRun fails only a command line OpenCode rejects", () => {
+  assert.equal(classifyRun({ status: 0, stdout: "PONG\n", stderr: "" }), "answered");
+  assert.equal(classifyRun({ status: 1, stdout: "", stderr: "USAGE\n  opencode run [flags]\nERROR\n  Unknown flag" }), "rejected");
+  assert.equal(classifyRun({ status: 1, stdout: "", stderr: 'Unexpected positional argument: "x"' }), "rejected");
+  assert.equal(classifyRun({ status: 1, stdout: "", stderr: "Error: rate limit exceeded" }), "provider");
+  assert.equal(classifyRun({ status: null, signal: "SIGTERM", timedOut: true, stdout: "", stderr: "" }), "no-answer");
+  assert.equal(classifyRun({ status: 0, stdout: "", stderr: "" }), "no-answer");
 });
 
 test("rollupStatus ranks fail over notice over pass", () => {
@@ -174,23 +87,41 @@ test("each OS running a channel gets its own label and issue", () => {
   );
 });
 
-test("diffV2Requests catches dropped fields and newly required ones", () => {
-  const doc = {
+test("the CLI help diff reports a command or option the plugin needs and the CLI lacks", () => {
+  const cli = require("./opencode-cli-contract.json");
+  const runHelp = [
+    "USAGE",
+    "  opencode run [flags] [<message...>]",
+    "FLAGS",
+    "  --session, -s string      Session ID to continue",
+    "  --model, -m string        Model to use",
+    "  --agent string            Agent to use",
+    "  --title string            Session title"
+  ].join("\n");
+
+  // 2.x has no --variant; the contract lists it for 1.x only.
+  assert.deepEqual(diffCliHelp("opencode run", cli.commands["opencode run"], 2, runHelp), []);
+  assert.deepEqual(diffCliHelp("opencode run", cli.commands["opencode run"], 1, runHelp), ["opencode run: no --variant option"]);
+  assert.deepEqual(diffCliHelp("opencode run", cli.commands["opencode run"], 2, runHelp.replace("--agent", "--persona")), [
+    "opencode run: no --agent option"
+  ]);
+  // An unknown subcommand prints the root help, which never names the command.
+  assert.deepEqual(
+    diffCliHelp("opencode session export", cli.commands["opencode session export"], 2, "USAGE\n  opencode <subcommand> [flags]"),
+    ["opencode session export: --help does not describe this command"]
+  );
+  assert.deepEqual(
+    diffCliHelp("opencode session list", cli.commands["opencode session list"], 2, "  opencode session list [flags]\n  --max-count, -n integer"),
+    []
+  );
+
+  const openapi = {
     paths: {
-      "/api/session/{id}/prompt": {
-        post: { requestBody: { content: { "application/json": { schema: { $ref: "#/components/schemas/Prompt" } } } } }
-      }
-    },
-    components: {
-      schemas: { Prompt: { type: "object", required: ["parts"], properties: { parts: {}, metadata: {} } } }
+      "/api/session/active": { get: { operationId: "session.active" } },
+      "/api/session/{sessionID}": { get: { operationId: "session.get" } }
     }
   };
-  const findings = diffV2Requests({ "POST /api/session/{sessionID}/prompt": { sends: ["text"] } }, doc);
-  assert.deepEqual(findings.breaking, [
-    'POST /api/session/{sessionID}/prompt: "text" is no longer accepted',
-    'POST /api/session/{sessionID}/prompt: "parts" is now required'
-  ]);
-  assert.deepEqual(diffV2Requests({ "POST /api/missing": { sends: [] } }, doc).breaking, [
-    "POST /api/missing: no JSON request body"
-  ]);
+  assert.deepEqual(missingApiOperations(cli, openapi), ["session.interrupt"]);
+  openapi.paths["/api/session/{sessionID}/interrupt"] = { post: { operationId: "session.interrupt" } };
+  assert.deepEqual(missingApiOperations(cli, openapi), []);
 });

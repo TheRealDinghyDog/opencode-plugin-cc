@@ -1,22 +1,21 @@
 name: OpenCode canary
 
-# CI only runs the plugin against a fake OpenCode, and the plugin directory's
-# health score only counts plugin loads. This runs the plugin against the real
-# OpenCode builds users install, so upstream API changes show up here before
-# users hit them (issue #49).
+# The plugin has no code: each command tells Claude which `opencode` command
+# line to run. CI can only compare those command lines with the pinned CLI
+# contract, and the plugin directory's health score only counts plugin loads.
+# This runs the real OpenCode builds users install, so an upstream change to
+# the CLI shows up here before users hit it (issues #49, #111).
 on:
   schedule:
     - cron: "17 6 * * 1" # Mondays 06:17 UTC
-  # Changes to the canary, to the contracts it checks, or to the plugin's
-  # runtime get a real run too (issues are only filed on schedule or by
-  # explicit dispatch).
+  # Changes to the canary, to the contract it checks, or to the plugin get a
+  # real run too (issues are only filed on schedule or by explicit dispatch).
   pull_request:
     paths:
       - .github/workflows/opencode-canary.yml
       - scripts/opencode-canary.mjs
-      - tests/opencode-event-contract.json
-      - tests/opencode-v2-contract.json
-      - plugins/opencode/scripts/**
+      - tests/opencode-cli-contract.json
+      - plugins/opencode/**
   workflow_dispatch:
     inputs:
       file_issues:
@@ -48,7 +47,7 @@ jobs:
           # What the README and /opencode:setup tell people to install.
           - channel: npm-latest
             os: ubuntu-latest
-          # The PR workflow covers Windows only against the fake OpenCode.
+          # The PR workflow never runs a real OpenCode.
           - channel: npm-latest
             os: windows-latest
           # The core Homebrew formula tracks every upstream tag; it shipped

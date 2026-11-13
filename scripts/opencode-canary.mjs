@@ -1,42 +1,37 @@
 #!/usr/bin/env node
-// Scheduled canary (issue #49). CI only runs the plugin against the fake
-// OpenCode fixture, and the plugin directory's health score only counts plugin
-// loads, so neither noticed when OpenCode 2.x broke every command. This runs
-// the plugin and a real `opencode serve` from whatever build a channel
-// installs, and compares the live API with the contracts the plugin pins.
+// Scheduled canary (issue #49). This plugin has no code of its own: each
+// command tells Claude which `opencode` command line to run, so OpenCode's CLI
+// is its whole contract with OpenCode (issue #111). CI can only compare the
+// plugin's Markdown with tests/opencode-cli-contract.json. This runs the real
+// `opencode` a channel installs and compares that file with what the CLI
+// actually accepts, so an upstream change shows up here before users hit it.
 //
 //   node scripts/opencode-canary.mjs [--channel <name>] [--turn] [--report <json>] [--summary <md>]
 //   node scripts/opencode-canary.mjs --file-issues <report.json> [--channel <name>] [--dry-run]
 //
 // The second form only talks to GitHub (via `gh`) and never starts OpenCode,
 // so the workflow can give it a token without exposing that token to OpenCode.
-import crypto from "node:crypto";
 import fs from "node:fs";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { parseOpencodeVersionInfo } from "../plugins/opencode/scripts/lib/opencode-server.mjs";
-import { readProcessCommandLine } from "../plugins/opencode/scripts/lib/process.mjs";
-
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const COMPANION = path.join(ROOT, "plugins", "opencode", "scripts", "opencode-companion.mjs");
-const SESSION_HOOK = path.join(ROOT, "plugins", "opencode", "scripts", "session-lifecycle-hook.mjs");
-const CONTRACT_FILES = {
-  1: path.join(ROOT, "tests", "opencode-event-contract.json"),
-  2: path.join(ROOT, "tests", "opencode-v2-contract.json")
-};
+const CLI_CONTRACT_FILE = path.join(ROOT, "tests", "opencode-cli-contract.json");
 // `opencode` and `npm` are .cmd shims on Windows, which only a shell starts.
 const ON_WINDOWS = process.platform === "win32";
 const PLATFORM_NAMES = { linux: "Linux", darwin: "macOS", win32: "Windows" };
 
 const TURN_PROMPT = "Reply with exactly the word PONG and nothing else. Do not use any tools.";
 const TURN_TIMEOUT_MS = 3 * 60 * 1000;
-const SERVER_READY_TIMEOUT_MS = 60 * 1000;
-const REQUEST_TIMEOUT_MS = 15 * 1000;
+
+// "opencode v2.2.7" on 2.x, a bare "1.19.5" on 1.x.
+export function parseVersion(text) {
+  const match = /(?:^|[^\d.])(\d+)\.(\d+)\.(\d+)(?![\d.])/.exec(String(text ?? ""));
+  return match ? { version: `${match[1]}.${match[2]}.${match[3]}`, major: Number(match[1]) } : null;
+}
 
 // "npm-latest on Windows": a channel runs on several OSes, and each run
 // needs its own issue.
@@ -50,149 +45,6 @@ export function failingIssueTitle(label) {
 
 export function newMajorIssueTitle(major, label) {
   return `OpenCode canary: OpenCode ${major}.x detected (${label})`;
-}
-
-// Rebuild the pinned shape of each event and object from a 1.x OpenAPI
-// document, the same way tests/opencode-event-contract.json was produced.
-export function extractV1Contract(doc, pinned) {
-  const schemas = doc?.components?.schemas ?? {};
-  const resolve = (schema) => (schema?.$ref ? schemas[schema.$ref.split("/").pop()] : schema);
-  const eventsByType = new Map();
-  for (const variant of schemas.Event?.anyOf ?? schemas.Event?.oneOf ?? []) {
-    const schema = resolve(variant);
-    const typeSchema = schema?.properties?.type;
-    const type = typeSchema?.const ?? typeSchema?.enum?.[0];
-    if (type) {
-      eventsByType.set(type, schema);
-    }
-  }
-
-  const events = {};
-  for (const name of Object.keys(pinned.events ?? {})) {
-    const schema = eventsByType.get(name);
-    if (!schema) {
-      continue;
-    }
-    const properties = resolve(schema.properties?.properties) ?? {};
-    events[name] = {
-      required: schema.required ?? [],
-      properties: { required: properties.required ?? [], keys: Object.keys(properties.properties ?? {}) }
-    };
-  }
-
-  const objects = {};
-  for (const name of Object.keys(pinned.objects ?? {})) {
-    const schema = schemas[name];
-    if (schema) {
-      objects[name] = { required: schema.required ?? [], keys: Object.keys(schema.properties ?? {}) };
-    }
-  }
-  return { events, objects };
-}
-
-// The pinned shapes are emitted by the server. A key that disappeared or
-// stopped being required can break the client; new keys, or keys that became
-// required, only add data the client ignores.
-function diffShape(label, pinned, live, findings) {
-  const liveKeys = new Set(live.keys ?? []);
-  const liveRequired = new Set(live.required ?? []);
-  for (const key of pinned.keys ?? []) {
-    if (!liveKeys.has(key)) {
-      findings.breaking.push(`${label}: "${key}" was removed`);
-    }
-  }
-  for (const key of pinned.required ?? []) {
-    if (liveKeys.has(key) && !liveRequired.has(key)) {
-      findings.breaking.push(`${label}: "${key}" is no longer required`);
-    }
-  }
-  const pinnedKeys = new Set(pinned.keys ?? []);
-  for (const key of live.keys ?? []) {
-    if (!pinnedKeys.has(key)) {
-      findings.additive.push(`${label}: new key "${key}"`);
-    }
-  }
-}
-
-export function diffV1Contract(pinned, live) {
-  const findings = { breaking: [], additive: [] };
-  for (const [name, spec] of Object.entries(pinned.events ?? {})) {
-    const liveSpec = live.events?.[name];
-    if (!liveSpec) {
-      findings.breaking.push(`event ${name} no longer exists`);
-      continue;
-    }
-    for (const key of spec.required ?? []) {
-      if (!liveSpec.required.includes(key)) {
-        findings.breaking.push(`event ${name}: envelope "${key}" is no longer required`);
-      }
-    }
-    diffShape(`event ${name} properties`, spec.properties ?? {}, liveSpec.properties, findings);
-  }
-  for (const [name, spec] of Object.entries(pinned.objects ?? {})) {
-    const liveSpec = live.objects?.[name];
-    if (!liveSpec) {
-      findings.breaking.push(`object ${name} no longer exists`);
-      continue;
-    }
-    diffShape(`object ${name}`, spec, liveSpec, findings);
-  }
-  return findings;
-}
-
-// Path parameter names are not part of the wire contract, so compare
-// templates with the names blanked out.
-function routeKey(method, routePath) {
-  return `${String(method).toUpperCase()} ${String(routePath).replace(/\{[^}]+\}/g, "{}")}`;
-}
-
-export function diffRoutes(pinnedRoutes, doc) {
-  const live = new Set();
-  for (const [routePath, operations] of Object.entries(doc?.paths ?? {})) {
-    for (const method of Object.keys(operations ?? {})) {
-      live.add(routeKey(method, routePath));
-    }
-  }
-  const breaking = (pinnedRoutes ?? [])
-    .filter((route) => !live.has(routeKey(route.method, route.path)))
-    .map((route) => `route ${route.method} ${route.path} is missing`);
-  return { breaking, additive: [] };
-}
-
-// Request bodies flow the other way: the plugin breaks when a field it sends
-// disappears or when the server starts requiring one it does not send.
-export function diffV2Requests(pinnedRequests, doc) {
-  const schemas = doc?.components?.schemas ?? {};
-  const operations = new Map();
-  for (const [routePath, ops] of Object.entries(doc?.paths ?? {})) {
-    for (const [method, operation] of Object.entries(ops ?? {})) {
-      operations.set(routeKey(method, routePath), operation);
-    }
-  }
-  const findings = { breaking: [], additive: [] };
-  for (const [route, spec] of Object.entries(pinnedRequests ?? {})) {
-    const [method, routePath] = route.split(" ");
-    let schema = operations.get(routeKey(method, routePath))?.requestBody?.content?.["application/json"]?.schema;
-    if (schema?.$ref) {
-      schema = schemas[schema.$ref.split("/").pop()];
-    }
-    if (!schema) {
-      findings.breaking.push(`${route}: no JSON request body`);
-      continue;
-    }
-    const keys = new Set(Object.keys(schema.properties ?? {}));
-    for (const key of spec.sends ?? []) {
-      if (!keys.has(key)) {
-        findings.breaking.push(`${route}: "${key}" is no longer accepted`);
-      }
-    }
-    for (const key of schema.required ?? []) {
-      if (!(spec.sends ?? []).includes(key)) {
-        findings.breaking.push(`${route}: "${key}" is now required`);
-      }
-    }
-  }
-  return findings;
 }
 
 export function rollupStatus(checks) {
@@ -259,222 +111,125 @@ function summarizeFindings(findings, limit = 8) {
   return `${shown.join("\n")}${more}`;
 }
 
-function contractCheck(record, name, findings) {
-  if (findings.breaking.length > 0) {
-    record(name, "fail", summarizeFindings(findings.breaking));
-  } else if (findings.additive.length > 0) {
-    record(name, "notice", `additive changes only:\n${summarizeFindings(findings.additive)}`);
-  } else {
-    record(name, "pass", "matches the pinned contract");
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Pure part of the CLI check: given a command's --help text, list what the
+// contract expects for this major version and the help does not show.
+export function diffCliHelp(command, entry, major, helpText) {
+  const missing = [];
+  const usage = new RegExp(`(^|\\s)${escapeRegExp(command)}(\\s|$)`, "m");
+  if (command !== "opencode" && !usage.test(helpText)) {
+    missing.push(`${command}: --help does not describe this command`);
+    return missing;
   }
-}
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address();
-      server.close(() => resolve(port));
-    });
-  });
-}
-
-// OpenCode and the plugin never see GitHub credentials. Nor do they inherit
-// a surrounding Claude session's companion state (data dir, session id,
-// transcript) when the canary runs inside one; the run sets its own.
-function childEnv(extra = {}) {
-  const env = { ...process.env, ...extra };
-  for (const key of [
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-    "OPENCODE_COMPANION_SERVER_URL",
-    "OPENCODE_SERVER_PASSWORD",
-    "OPENCODE_COMPANION_PLUGIN_DATA",
-    "OPENCODE_COMPANION_SESSION_ID",
-    "OPENCODE_COMPANION_TRANSCRIPT_PATH",
-    "CLAUDE_PLUGIN_DATA"
-  ]) {
-    if (!(key in extra)) {
-      delete env[key];
+  for (const [flag, majors] of Object.entries(entry.flags ?? {})) {
+    if (!majors.includes(major)) {
+      continue;
     }
+    if (!new RegExp(`(^|[\\s,])${escapeRegExp(flag)}([\\s,=]|$)`, "m").test(helpText)) {
+      missing.push(`${command}: no ${flag} option`);
+    }
+  }
+  return missing;
+}
+
+// OpenCode never sees GitHub credentials.
+function childEnv() {
+  const env = { ...process.env };
+  for (const key of ["GH_TOKEN", "GITHUB_TOKEN"]) {
+    delete env[key];
   }
   return env;
 }
 
-async function request(server, method, routePath, body) {
-  const response = await fetch(`${server.url}${routePath}`, {
-    method,
-    headers: {
-      authorization: server.authorization,
-      ...(body === undefined ? {} : { "content-type": "application/json" })
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-  });
-  const text = await response.text();
-  let json = null;
+// Runs `opencode` with its output in files, not pipes. On 2.x the first
+// command starts OpenCode's background service, and a service that inherited
+// a pipe would keep this call waiting after the command itself has exited.
+function runOpencode(args, { cwd, env, input, timeout }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-canary-out-"));
+  const outFile = path.join(dir, "stdout");
+  const errFile = path.join(dir, "stderr");
+  const out = fs.openSync(outFile, "w");
+  const err = fs.openSync(errFile, "w");
+  let result;
   try {
-    json = JSON.parse(text);
-  } catch {
-    // Not JSON: 2.x answers retired 1.x routes with its web UI.
-  }
-  return { status: response.status, contentType: response.headers.get("content-type") ?? "", json, text };
-}
-
-async function firstEvent(server, routePath) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${server.url}${routePath}`, {
-      headers: { authorization: server.authorization, accept: "text/event-stream" },
-      signal: controller.signal
+    result = spawnSync("opencode", args, {
+      cwd,
+      env,
+      input: input ?? "",
+      stdio: ["pipe", out, err],
+      timeout,
+      shell: ON_WINDOWS,
+      windowsHide: true
     });
-    if (!response.ok || !response.body) {
-      return { ok: false, detail: `HTTP ${response.status}` };
-    }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) {
-        return { ok: false, detail: "stream ended before the first event" };
-      }
-      buffer += decoder.decode(value, { stream: true });
-      const line = buffer.split("\n").find((candidate) => candidate.startsWith("data:"));
-      if (line) {
-        const event = JSON.parse(line.slice(5).trim());
-        return { ok: true, detail: `first event: ${event.type ?? "(untyped)"}` };
-      }
-    }
-  } catch (error) {
-    return { ok: false, detail: error instanceof Error ? error.message : String(error) };
   } finally {
-    clearTimeout(timer);
-    controller.abort();
+    fs.closeSync(out);
+    fs.closeSync(err);
+  }
+  const stdout = fs.readFileSync(outFile, "utf8");
+  const stderr = fs.readFileSync(errFile, "utf8");
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  return { status: result.status, signal: result.signal, error: result.error, stdout, stderr };
+}
+
+// Asks the installed CLI for the help of every command the plugin uses and
+// compares it with the contract.
+function checkCliHelp(contract, versionInfo, workspace, env, record) {
+  const missing = [];
+  let checked = 0;
+  for (const [command, entry] of Object.entries(contract.commands)) {
+    if (!entry.majors.includes(versionInfo.major)) {
+      continue;
+    }
+    const help = runOpencode([...command.split(" ").slice(1), "--help"], { cwd: workspace, env, timeout: 30 * 1000 });
+    checked += 1;
+    if (help.error || help.status !== 0) {
+      missing.push(`${command}: --help failed (${help.error?.message ?? `exit ${help.status}`})`);
+      continue;
+    }
+    missing.push(...diffCliHelp(command, entry, versionInfo.major, `${help.stdout}${help.stderr}`));
+  }
+  if (missing.length > 0) {
+    record("CLI options", "fail", summarizeFindings(missing));
+  } else {
+    record("CLI options", "pass", `${checked} commands match the pinned options`);
   }
 }
 
-async function startServer(cwd) {
-  const port = await freePort();
-  const password = crypto.randomBytes(24).toString("base64url");
-  const child = spawn("opencode", ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
-    cwd,
-    env: childEnv({ OPENCODE_SERVER_PASSWORD: password }),
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: ON_WINDOWS,
-    windowsHide: true
-  });
-  let output = "";
-  child.stdout.on("data", (chunk) => (output += chunk));
-  child.stderr.on("data", (chunk) => (output += chunk));
-  const server = {
-    child,
-    url: `http://127.0.0.1:${port}`,
-    authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`,
-    output: () => output.slice(-2000)
-  };
-
-  const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`opencode serve exited with ${child.exitCode}: ${server.output()}`);
-    }
-    for (const probe of ["/global/health", "/api/info"]) {
-      try {
-        const result = await request(server, "GET", probe);
-        if (result.status === 200 && result.json) {
-          return server;
-        }
-      } catch {
-        // Not listening yet.
+// `opencode api <operation>` takes an OpenAPI operation ID, so the status and
+// cancel commands depend on these names.
+export function missingApiOperations(cliContract, openapi) {
+  const live = new Set();
+  for (const methods of Object.values(openapi?.paths ?? {})) {
+    for (const operation of Object.values(methods ?? {})) {
+      if (operation && typeof operation.operationId === "string") {
+        live.add(operation.operationId);
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  stopServer(server);
-  throw new Error(`opencode serve did not become ready within ${SERVER_READY_TIMEOUT_MS / 1000}s: ${server.output()}`);
+  return (cliContract?.commands?.["opencode api"]?.operations ?? []).filter((operation) => !live.has(operation));
 }
 
-function stopServer(server) {
-  if (!server?.child || server.child.exitCode !== null) {
+// Reads the OpenAPI document the way the plugin's commands reach OpenCode:
+// through `opencode api` and OpenCode's own background service.
+function checkApiOperations(contract, workspace, env, record) {
+  const name = "API operations";
+  const result = runOpencode(["api", "GET", "/openapi.json"], { cwd: workspace, env, timeout: 2 * 60 * 1000 });
+  let openapi = null;
+  try {
+    openapi = JSON.parse(result.stdout);
+  } catch {
+    // Reported below.
+  }
+  if (!openapi?.paths) {
+    const detail = result.error?.message ?? (result.stderr.trim().split(/\r?\n/).slice(0, 3).join("\n") || `exit ${result.status}`);
+    record(name, "fail", `\`opencode api GET /openapi.json\` did not return an OpenAPI document: ${detail}`);
     return;
   }
-  if (ON_WINDOWS) {
-    // The child is the shell; /T takes the server below it too.
-    spawnSync("taskkill", ["/pid", String(server.child.pid), "/T", "/F"], { windowsHide: true });
-    return;
-  }
-  server.child.kill("SIGTERM");
-  const timer = setTimeout(() => {
-    if (server.child.exitCode === null) {
-      server.child.kill("SIGKILL");
-    }
-  }, 3000);
-  timer.unref();
-}
-
-async function checkV1Server(server, contract, workspace, record) {
-  const health = await request(server, "GET", "/global/health");
-  if (health.json?.healthy === true && typeof health.json.version === "string") {
-    record("1.x health", "pass", `{"healthy":true,"version":"${health.json.version}"}`);
-  } else {
-    record("1.x health", "fail", `unexpected response (HTTP ${health.status}, ${health.contentType})`);
-  }
-
-  const doc = await request(server, "GET", "/doc");
-  if (!doc.json?.components?.schemas) {
-    record("1.x contract", "fail", `/doc is not an OpenAPI document (HTTP ${doc.status}, ${doc.contentType})`);
-  } else {
-    contractCheck(record, "1.x event contract", diffV1Contract(contract, extractV1Contract(doc.json, contract)));
-    contractCheck(record, "1.x routes", diffRoutes(contract.routes, doc.json));
-  }
-
-  const directory = encodeURIComponent(fs.realpathSync.native(workspace));
-  const created = await request(server, "POST", `/session?directory=${directory}`, {});
-  if (typeof created.json?.id === "string") {
-    const removed = await request(server, "DELETE", `/session/${encodeURIComponent(created.json.id)}?directory=${directory}`);
-    const deleted = removed.status >= 200 && removed.status < 300;
-    record("1.x session", deleted ? "pass" : "fail", deleted ? "created and deleted" : `created, but DELETE returned HTTP ${removed.status}`);
-  } else {
-    record("1.x session", "fail", `POST /session returned HTTP ${created.status}`);
-  }
-
-  const event = await firstEvent(server, "/event");
-  record("1.x event stream", event.ok ? "pass" : "fail", event.detail);
-}
-
-async function checkV2Server(server, contract, workspace, record) {
-  const info = await request(server, "GET", "/api/info");
-  if (typeof info.json?.version === "string") {
-    record("2.x info", "pass", `version ${info.json.version}`);
-  } else {
-    record("2.x info", "fail", `unexpected response (HTTP ${info.status}, ${info.contentType})`);
-  }
-
-  const openapi = await request(server, "GET", "/openapi.json");
-  if (!openapi.json?.paths) {
-    record("2.x routes", "fail", `/openapi.json is not an OpenAPI document (HTTP ${openapi.status})`);
-  } else {
-    contractCheck(record, "2.x routes", diffRoutes(contract.routes, openapi.json));
-    contractCheck(record, "2.x request bodies", diffV2Requests(contract.requests, openapi.json));
-  }
-
-  const created = await request(server, "POST", "/api/session", {
-    location: { directory: fs.realpathSync.native(workspace) }
-  });
-  const sessionID = created.json?.data?.id;
-  if (typeof sessionID === "string") {
-    const removed = await request(server, "DELETE", `/api/session/${encodeURIComponent(sessionID)}`);
-    const deleted = removed.status >= 200 && removed.status < 300;
-    record("2.x session", deleted ? "pass" : "fail", deleted ? "created and deleted" : `created, but DELETE returned HTTP ${removed.status}`);
-  } else {
-    record("2.x session", "fail", `POST /api/session returned HTTP ${created.status}`);
-  }
-
-  const event = await firstEvent(server, "/api/event");
-  record("2.x event stream", event.ok ? "pass" : "fail", event.detail);
+  const gone = missingApiOperations(contract, openapi);
+  record(name, gone.length > 0 ? "fail" : "pass", gone.length > 0 ? `no longer offered: ${gone.join(", ")}` : "all present in /openapi.json");
 }
 
 // A channel is only worth testing at its current release: GitHub's macOS
@@ -506,203 +261,66 @@ function checkChannelFreshness(channel, installedVersion, record) {
   }
   if (!latest) {
     record("channel is current", "notice", `could not look up the latest ${channel} version`);
-  } else if (parseOpencodeVersionInfo(latest)?.version !== installedVersion) {
+  } else if (parseVersion(latest)?.version !== installedVersion) {
     record("channel is current", "fail", `installed ${installedVersion}, but ${channel} currently ships ${latest}`);
   } else {
     record("channel is current", "pass", `${channel} currently ships ${latest}`);
   }
 }
 
-function runCompanion(args, workspace, env, timeout) {
-  return spawnSync(process.execPath, [COMPANION, ...args], {
-    cwd: workspace,
-    env,
-    encoding: "utf8",
-    timeout,
-    maxBuffer: 10 * 1024 * 1024
-  });
+// What a run's output says about the command line itself. OpenCode answers an
+// option or command it does not know with its help text or an "unknown" /
+// "unexpected" message; anything else that goes wrong is the provider's or the
+// model's trouble.
+export function classifyRun({ status, signal, timedOut, stdout, stderr }) {
+  const output = `${stdout ?? ""}\n${stderr ?? ""}`;
+  if (timedOut || signal) {
+    return "no-answer";
+  }
+  if (/\bPONG\b/.test(stdout ?? "") && !String(stdout).includes(TURN_PROMPT)) {
+    return "answered";
+  }
+  if (/\b(unknown|unexpected|unrecognized|invalid) (option|argument|flag|command|positional)/i.test(output)) {
+    return "rejected";
+  }
+  if (/^\s*(USAGE|Usage:|Options:|FLAGS|Commands:)/m.test(output)) {
+    return "rejected";
+  }
+  return status === 0 ? "no-answer" : "provider";
 }
 
-function checkSetup(setup, versionInfo, contract, record) {
-  const major = versionInfo.major;
-  if (!setup) {
-    record("plugin setup", "fail", "setup --json did not return JSON");
-    return false;
-  }
-  if (setup.opencode?.unsupported) {
-    if (!contract) {
-      record("plugin setup", "notice", `OpenCode ${major}.x is a new major; the plugin reports it unsupported`);
-    } else if (major === 1) {
-      record("plugin setup", "fail", setup.opencode.detail);
-    } else {
-      record("plugin setup", "notice", `the plugin still reports OpenCode ${major}.x unsupported`);
-    }
-    return false;
-  }
-  if (!contract) {
-    record("plugin setup", "fail", `the plugin accepts OpenCode ${major}.x, which has no pinned contract`);
-    return false;
-  }
-  if (!setup.opencode?.available) {
-    record("plugin setup", "fail", setup.opencode?.detail ?? "OpenCode reported unavailable");
-    return false;
-  }
-  // No provider is the expected state on a clean CI machine; what matters is
-  // that the plugin reached the server it started.
-  if (setup.auth?.source !== "server") {
-    record("plugin setup", "fail", `the plugin did not reach its server: ${setup.auth?.detail ?? "no detail"}`);
-    return false;
-  }
-  record("plugin setup", "pass", `ready=${setup.ready}; ${setup.auth.detail}`);
-  return true;
-}
-
-// Free models need no credentials, but they rotate and can be region-locked,
-// so provider-side trouble is a notice; only plugin-side breakage fails.
-function checkTurn(workspace, env, record) {
-  const models = spawnSync("opencode", ["models", "opencode"], {
-    cwd: workspace,
-    env,
-    encoding: "utf8",
-    timeout: 60 * 1000,
-    shell: ON_WINDOWS
-  });
-  const model = String(models.stdout ?? "")
+// Sends one prompt the way the plugin's commands do: `opencode run` with the
+// agent first, a title, and the prompt on standard input. Free models need no
+// credentials, but they rotate and can be region-locked, so provider-side
+// trouble is a notice; only a command line OpenCode rejects fails.
+function checkRun(workspace, env, record) {
+  const name = "free-model run";
+  const models = runOpencode(["models"], { cwd: workspace, env, timeout: 60 * 1000 });
+  const model = models.stdout
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find((line) => /^opencode\/\S+-free$/.test(line));
   if (!model) {
-    record("free-model turn", "notice", "no free OpenCode model is listed; skipped");
+    record(name, "notice", "no free OpenCode model is listed; skipped");
     return;
   }
 
-  const result = runCompanion(["task", "--model", model, TURN_PROMPT], workspace, env, TURN_TIMEOUT_MS);
-  const output = String(result.stdout ?? "").trim();
-  if (result.error?.code === "ETIMEDOUT" || result.signal) {
-    record("free-model turn", "notice", `${model}: no result within ${TURN_TIMEOUT_MS / 60000} minutes`);
-  } else if (/\bPONG\b/.test(output) && !output.includes(TURN_PROMPT)) {
-    record("free-model turn", "pass", `${model} answered`);
-  } else if (/^OpenCode error:/m.test(output)) {
-    record("free-model turn", "notice", `${model}: ${output.slice(0, 300)}`);
-  } else {
-    const stderr = String(result.stderr ?? "").trim().split(/\r?\n/).slice(-5).join("\n");
-    record("free-model turn", "fail", `${model}: exit ${result.status}; ${output.slice(0, 300) || stderr}`);
-  }
-}
-
-function findServerRecords(dir) {
-  const records = [];
-  const walk = (current) => {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (entry.name === "server.json") {
-        try {
-          records.push(JSON.parse(fs.readFileSync(full, "utf8")));
-        } catch {
-          // A half-written record has nothing to probe.
-        }
-      }
-    }
-  };
-  try {
-    walk(dir);
-  } catch {
-    // No state written yet.
-  }
-  return records;
-}
-
-// Which process actually listens on a server's port, and what it is. On
-// Windows the plugin's recorded PID can be the shell it spawned the server
-// through, so a teardown failure names both.
-function describeServerProcesses(url, recordedPid) {
-  const parts = [`recorded pid ${recordedPid ?? "none"}: ${readProcessCommandLine(recordedPid) ?? "(no such process)"}`];
-  let listener = null;
-  if (ON_WINDOWS) {
-    const port = Number(new URL(url).port);
-    const result = spawnSync(
-      "powershell.exe",
-      ["-NoProfile", "-Command", `(Get-NetTCPConnection -LocalPort ${port} -State Listen | Select-Object -First 1).OwningProcess`],
-      { encoding: "utf8", windowsHide: true }
-    );
-    listener = Number(String(result.stdout ?? "").trim()) || null;
-    parts.push(`listening pid ${listener ?? "unknown"}: ${readProcessCommandLine(listener) ?? "(unknown)"}`);
-  }
-  return { detail: parts.join("; "), listener };
-}
-
-async function respondsAt(url) {
-  try {
-    await fetch(`${url}/`, { signal: AbortSignal.timeout(1500) });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function killTree(pid) {
-  if (!Number.isFinite(pid)) {
-    return;
-  }
-  if (ON_WINDOWS) {
-    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true });
-  } else {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      // Already gone.
-    }
-  }
-}
-
-// Ends the run the way a Claude session ends, and checks that it really did:
-// any OpenCode server still answering afterwards is a failure (on Windows
-// the plugin's teardown has to find the server behind its spawn shell).
-async function cleanUp({ server, workspace, pluginData, env, sessionId, record }) {
-  const pluginServers = findServerRecords(pluginData);
-  stopServer(server);
-  const hook = spawnSync(process.execPath, [SESSION_HOOK, "SessionEnd"], {
+  const result = runOpencode(["run", "--agent", "plan", "--model", model, "--title", "Claude-Code-canary"], {
     cwd: workspace,
     env,
-    input: JSON.stringify({ cwd: workspace, session_id: sessionId }),
-    encoding: "utf8",
-    timeout: 30 * 1000
+    input: `${TURN_PROMPT}\n`,
+    timeout: TURN_TIMEOUT_MS
   });
-  const hookOutput = `${hook.stdout ?? ""}${hook.stderr ?? ""}`.trim();
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-
-  const survivors = [];
-  if (server && (await respondsAt(server.url))) {
-    survivors.push(`the canary's own server ${server.url}`);
-    killTree(server.child.pid);
-  }
-  for (const entry of pluginServers) {
-    if (entry?.url && (await respondsAt(entry.url))) {
-      const { detail, listener } = describeServerProcesses(entry.url, entry.pid);
-      survivors.push(`the plugin's server ${entry.url} (${detail})`);
-      killTree(entry.pid);
-      killTree(listener);
-    }
-  }
-  if (survivors.length > 0) {
-    record(
-      "teardown",
-      "fail",
-      `still running after session end: ${survivors.join("; ")}${hookOutput ? `\nSessionEnd hook: ${hookOutput}` : ""}`
-    );
-  } else if (pluginServers.length > 0) {
-    record("teardown", "pass", "the plugin's server stopped at session end");
-  }
-
-  for (const dir of [workspace, pluginData]) {
-    try {
-      // Windows can hold files for a moment after a process exits.
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
-    } catch (error) {
-      record("cleanup", "notice", `could not remove ${dir}: ${error.code ?? error.message}`);
-    }
+  const outcome = classifyRun({ ...result, timedOut: result.error?.code === "ETIMEDOUT" });
+  const tail = `${result.stdout}\n${result.stderr}`.trim().split(/\r?\n/).slice(-5).join("\n").slice(0, 400);
+  if (outcome === "answered") {
+    record(name, "pass", `${model} answered`);
+  } else if (outcome === "rejected") {
+    record(name, "fail", `OpenCode rejected the command line (exit ${result.status}):\n${tail}`);
+  } else if (outcome === "no-answer") {
+    record(name, "notice", `${model}: no answer within ${TURN_TIMEOUT_MS / 60000} minutes or an empty one`);
+  } else {
+    record(name, "notice", `${model}: exit ${result.status}; ${tail}`);
   }
 }
 
@@ -711,70 +329,47 @@ export async function runCanary(options = {}) {
   const checks = [];
   const record = (name, status, detail) => checks.push({ name, status, detail: String(detail ?? "") });
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-canary-"));
-  const pluginData = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-canary-data-"));
-  const sessionId = `canary-${crypto.randomBytes(6).toString("hex")}`;
-  // OPENCODE_COMPANION_PLUGIN_DATA wins over CLAUDE_PLUGIN_DATA (issue #61).
-  const env = childEnv({
-    OPENCODE_COMPANION_PLUGIN_DATA: pluginData,
-    CLAUDE_PLUGIN_DATA: pluginData,
-    OPENCODE_COMPANION_SESSION_ID: sessionId
-  });
+  const env = childEnv();
   spawnSync("git", ["init", "-q"], { cwd: workspace });
 
   let versionInfo = null;
-  let contract = null;
-  let server = null;
+  let knownMajor = false;
   try {
-    const version = spawnSync("opencode", ["--version"], {
-      cwd: workspace,
-      env,
-      encoding: "utf8",
-      timeout: 30 * 1000,
-      shell: ON_WINDOWS
-    });
-    versionInfo = parseOpencodeVersionInfo(`${version.stdout ?? ""}${version.stderr ?? ""}`);
+    const version = runOpencode(["--version"], { cwd: workspace, env, timeout: 30 * 1000 });
+    versionInfo = parseVersion(`${version.stdout}${version.stderr}`);
     if (!versionInfo) {
       record("opencode --version", "fail", version.error?.message ?? (`${version.stdout}${version.stderr}`.trim() || `exit ${version.status}`));
     } else {
       record("opencode --version", "pass", versionInfo.version);
       checkChannelFreshness(channel, versionInfo.version, record);
-      const contractFile = CONTRACT_FILES[versionInfo.major];
-      contract = contractFile ? JSON.parse(fs.readFileSync(contractFile, "utf8")) : null;
-
-      const setupRun = runCompanion(["setup", "--json"], workspace, env, 2 * 60 * 1000);
-      let setup = null;
-      try {
-        setup = JSON.parse(setupRun.stdout);
-      } catch {
-        // Recorded as a failure below.
-      }
-      const pluginReady = checkSetup(setup, versionInfo, contract, record);
-
-      if (contract) {
-        try {
-          server = await startServer(workspace);
-          if (versionInfo.major === 1) {
-            await checkV1Server(server, contract, workspace, record);
-          } else {
-            await checkV2Server(server, contract, workspace, record);
-          }
-        } catch (error) {
-          record("opencode serve", "fail", error instanceof Error ? error.message : String(error));
+      const contract = JSON.parse(fs.readFileSync(CLI_CONTRACT_FILE, "utf8"));
+      knownMajor = Object.values(contract.commands).some((entry) => entry.majors.includes(versionInfo.major));
+      if (!knownMajor) {
+        record("CLI options", "notice", `OpenCode ${versionInfo.major}.x is a new major; the CLI contract lists no commands for it`);
+      } else {
+        checkCliHelp(contract, versionInfo, workspace, env, record);
+        if (contract.commands["opencode api"]?.majors.includes(versionInfo.major)) {
+          checkApiOperations(contract, workspace, env, record);
         }
-      }
-
-      if (options.turn && pluginReady) {
-        checkTurn(workspace, env, record);
+        if (options.turn) {
+          checkRun(workspace, env, record);
+        }
       }
     }
   } catch (error) {
     record("canary run", "fail", error instanceof Error ? error.stack ?? error.message : String(error));
   }
-  await cleanUp({ server, workspace, pluginData, env, sessionId, record });
-  return finishReport({ channel, checks, versionInfo, contract });
+
+  try {
+    // Windows can hold files for a moment after a process exits.
+    fs.rmSync(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch (error) {
+    record("cleanup", "notice", `could not remove ${workspace}: ${error.code ?? error.message}`);
+  }
+  return finishReport({ channel, checks, versionInfo, knownMajor });
 }
 
-function finishReport({ channel, checks, versionInfo, contract }) {
+function finishReport({ channel, checks, versionInfo, knownMajor }) {
   const runUrl =
     process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
       ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
@@ -785,7 +380,7 @@ function finishReport({ channel, checks, versionInfo, contract }) {
     label: reportLabel(channel),
     opencodeVersion: versionInfo?.version ?? null,
     major: versionInfo?.major ?? null,
-    newMajor: versionInfo && !contract ? versionInfo.major : null,
+    newMajor: versionInfo && !knownMajor ? versionInfo.major : null,
     status: rollupStatus(checks),
     checkedAt: new Date().toISOString(),
     runUrl,
@@ -811,7 +406,7 @@ function fileIssues(reportPath, options) {
       channel: options.channel ?? "unknown",
       checks: [{ name: "canary run", status: "fail", detail: `no report at ${reportPath}: ${error.message}` }],
       versionInfo: null,
-      contract: null
+      knownMajor: false
     });
   }
   const openIssues = options.dryRun

@@ -1,61 +1,136 @@
 ---
-description: Run a OpenCode code review against local git state
+description: Run a read-only OpenCode code review against local git state
 argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch]'
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" *), AskUserQuestion
+disallowed-tools: Edit, Write, NotebookEdit
 ---
 
-Run a OpenCode review through the shared built-in reviewer.
+Run an OpenCode review of local git changes by calling the user's own `opencode` CLI.
+
+This command works only in Claude Code running on the user's own computer, where their OpenCode is installed. In claude.ai chat, the Claude apps or Cowork, any shell you have is a sandbox that does not hold the user's OpenCode or their logins: say that this plugin needs Claude Code, and stop. Do not run or install anything there.
 
 Raw slash-command arguments:
-`$ARGUMENTS`
+$ARGUMENTS
 
-Core constraint:
-- This command is review-only.
-- Do not fix issues, apply patches, or suggest that you are about to make changes.
-- Your only job is to run the review and return OpenCode's output verbatim to the user.
+## Core constraint
 
-Execution mode rules:
-- If the raw arguments include `--wait`, do not ask. Run the review in the foreground.
-- If the raw arguments include `--background`, do not ask. Run the review in a Claude background task.
-- Otherwise, estimate the review size before asking:
-  - For working-tree review, start with `git status --short --untracked-files=all`.
-  - For working-tree review, also inspect both `git diff --shortstat --cached` and `git diff --shortstat`.
-  - For base-branch review, use `git diff --shortstat <base>...HEAD`.
-  - Treat untracked files or directories as reviewable work even when `git diff --shortstat` is empty.
-  - Only conclude there is nothing to review when the relevant working-tree status is empty or the explicit branch diff is empty.
-  - Recommend waiting only when the review is clearly tiny, roughly 1-2 files total and no sign of a broader directory-sized change.
-  - In every other case, including unclear size, recommend background.
-  - When in doubt, run the review instead of declaring that there is nothing to review.
-- Then use `AskUserQuestion` exactly once with two options, putting the recommended option first and suffixing its label with `(Recommended)`:
-  - `Wait for results`
-  - `Run in background`
+- This command is review-only. Do not fix issues, apply patches, or say you are about to make changes.
+- Never call the review "guaranteed read-only". OpenCode is told to change nothing and its edit tools are blocked, and you check the working tree afterwards.
+- Your only job is to run the review and return OpenCode's answer verbatim.
 
-Argument handling:
-- Preserve the user's arguments exactly.
-- Do not strip `--wait` or `--background` yourself.
-- Do not add extra review instructions or rewrite the user's intent.
-- The companion script parses `--wait` and `--background`, but Claude Code's `Bash(..., run_in_background: true)` is what actually detaches the run.
-- `/opencode:review` is native-review only. It does not support staged-only review, unstaged-only review, or extra focus text.
-- If the user needs custom review instructions or more adversarial framing, they should use `/opencode:adversarial-review`.
+## Rules for every OpenCode call
 
-Foreground flow:
-- Run:
+- Use only the `opencode` invocations written in this file. If one fails with an unknown option or an unknown command, or prints OpenCode's help text instead of doing what was asked, stop: show the user the exact output and the output of `opencode --version`, and say the plugin may not support that OpenCode version yet. Do not try other flags or subcommands.
+- Never add `--auto`. In these non-interactive runs OpenCode rejects any permission request it would otherwise ask about, and that is intended.
+- Pass the prompt on standard input with a quoted here-document, exactly as shown, so the shell expands nothing in it. If the prompt contains a line that reads `OPENCODE_PROMPT`, use another delimiter. In PowerShell, pipe a single-quoted here-string to the same command instead.
+- A title is plain words: letters, digits, spaces, `-`, `.` and `:` only.
+- Check values before they go on a command line. A session ID has only letters, digits, `_` and `-`. A git ref, model or variant has only letters, digits and `/ . _ - : @ ~ ^`. If a value has anything else, say so and stop.
+- If `opencode` is not installed or not logged in, stop and tell the user to run `/opencode:setup`.
+
+## Choose the target
+
+- `--scope working-tree`: review staged, unstaged and untracked changes.
+- `--scope branch`, or `--base <ref>` given: review the current branch against the base. Without `--base`, use the repository's default branch.
+- `--scope auto` or no scope: use the working tree when `git status --short --untracked-files=all` shows changes, otherwise the branch against the default branch.
+- This command takes no focus text and no staged-only or unstaged-only mode. If the user wants custom instructions, point them to `/opencode:adversarial-review`.
+- Only conclude there is nothing to review when the working-tree status is empty and the branch diff is empty. When in doubt, run the review.
+
+## Choose foreground or background
+
+- If the arguments include `--wait`, run in the foreground without asking.
+- If the arguments include `--background`, run in the background without asking.
+- Otherwise estimate the size first: `git status --short --untracked-files=all`, and `git diff --shortstat --cached` plus `git diff --shortstat` for a working-tree review, or `git diff --shortstat <base>...HEAD` for a branch review. Count untracked files as work to review.
+- Recommend waiting only when the review is clearly tiny, roughly 1-2 files. In every other case, including unclear size, recommend background.
+- Then use `AskUserQuestion` exactly once with two options, the recommended one first with `(Recommended)` after its label: `Wait for results` and `Run in background`.
+
+## Build the prompt
+
+Fill in the two placeholders in this template and change nothing else:
+
+```text
+<role>
+You are OpenCode performing a balanced, high-signal software review.
+Your job is to find real bugs, correctness issues, and regressions in the change.
+</role>
+
+<task>
+Review the change described below for bugs, correctness issues, regressions, and quality problems.
+Target: {{TARGET}}
+</task>
+
+<collection>
+You are running inside the repository. Collect the change yourself with read-only git commands:
+{{COLLECTION}}
+Read the changed files where the diff alone does not show enough.
+Do not modify, create or delete any file. Do not run commands that change the repository.
+</collection>
+
+<operating_stance>
+Be honest, calibrated, and thorough.
+Flag what matters. Acknowledge what looks correct.
+Do not manufacture skepticism or invent problems where none exist.
+If the change is solid, say so clearly.
+</operating_stance>
+
+<focus_areas>
+Prioritize findings that affect correctness, reliability, or security:
+- logic errors, off-by-one mistakes, and incorrect control flow
+- broken contracts, type mismatches, and violated invariants
+- resource leaks, missing cleanup, and unhandled error paths
+- race conditions, ordering assumptions, and stale-state bugs
+- data loss, corruption, duplication, or irreversible state changes
+- regressions that break existing behavior or compatibility
+- missing tests or verification for critical paths
+- unclear or misleading code that hides a real defect
+</focus_areas>
+
+<finding_bar>
+Each finding must say what the defect is, where it is (file and line range), what the impact is, and how to fix it.
+Skip style nits, naming preferences, and opinion-only feedback.
+Do not report issues you cannot support from the code.
+</finding_bar>
+
+<output_contract>
+Reply in Markdown with these sections, in this order:
+1. `Verdict:` followed by `approve` or `needs-attention`. Use `needs-attention` for any material finding.
+2. `Summary:` a terse, actionable assessment in one to three sentences.
+3. `Findings:` a numbered list, strongest first. Each item gives a severity (critical, high, medium or low), `file:line_start-line_end`, the defect, the impact, a concrete recommendation, and a confidence from 0 to 1. Write `No findings.` if the change is clean.
+4. `Next steps:` at most three short bullets, or omit the section.
+Group related issues rather than splitting them.
+</output_contract>
+
+<final_check>
+Before finalizing, check that each finding is a real defect, tied to a concrete code location, supported by what you read, and actionable.
+</final_check>
+```
+
+- `{{TARGET}}`: `working tree (staged, unstaged and untracked changes)`, or `branch <current> against <base>`.
+- `{{COLLECTION}}` for a working-tree review: `git status --short --untracked-files=all`, `git diff --cached`, `git diff`, and read each untracked file.
+- `{{COLLECTION}}` for a branch review: `git log --oneline <base>..HEAD` and `git diff <base>...HEAD`.
+
+## Run the review
+
+Foreground: one `Bash` call with `timeout` set to 600000.
+
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" review "$ARGUMENTS"
+opencode run --agent plan --title "Claude Code review: <target in a few words>" <<'OPENCODE_PROMPT'
+<the filled-in prompt>
+OPENCODE_PROMPT
 ```
-- Return the command stdout verbatim, exactly as-is.
-- Do not paraphrase, summarize, or add commentary before or after it.
-- Do not fix any issues mentioned in the review output.
 
-Background flow:
-- Launch the review with `Bash` in the background:
-```typescript
-Bash({
-  command: `node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" review "$ARGUMENTS"`,
-  description: "OpenCode review",
-  run_in_background: true
-})
-```
-- Do not call `BashOutput` or wait for completion in this turn.
-- After launching the command, tell the user: "OpenCode review started in the background. Check `/opencode:status` for progress."
+Background: the same command in one `Bash` call with `run_in_background: true`. Do not wait for it in this turn. Tell the user: "OpenCode review started in the background. I'll show the result when it finishes. `/opencode:status` shows progress."
+
+## Check that nothing changed
+
+A review is read-only by instruction, not by force. OpenCode blocks the `plan` agent's edit tools, but the agent can still run shell commands, and on OpenCode 2.x nothing stops one that writes a file.
+
+- Before you start the run, foreground or background, note the output of `git status --short --untracked-files=all` and of `git diff --shortstat HEAD`.
+- When the run has finished, run both again.
+- If either differs, say so before the review itself: name the files that changed while the review ran and tell the user to inspect them with `git diff`. Do not revert or fix anything yourself.
+
+## Present the result
+
+- OpenCode prints progress first: lines that start with a marker (`>`, `$`, `→`, `←`, `✱`, `✗`, or an exclamation mark for a permission notice), and the output of the commands it ran. Its answer is the text after the last of those. Lines inside the answer itself, such as a Markdown quote that starts with `>` or a `$` line in a code block, belong to the answer.
+- Return the answer verbatim. Do not paraphrase, summarize, or add commentary before or after it.
+- If there is no answer, or the run failed or timed out, show the last progress and error lines and stop. A foreground run that hit the time limit was stopped; suggest `--background`. On OpenCode 2.x the session can keep running in OpenCode's service after that: tell the user that `/opencode:status` shows it and `/opencode:cancel <session id>` stops it.
+- Do not fix any issue the review mentions. Ask the user which findings, if any, they want fixed before touching a file.

@@ -2,7 +2,7 @@
 
 Use these as starting templates for OpenCode task prompts.
 Copy the smallest recipe that fits the task, then trim anything you do not need.
-In `opencode:opencode-rescue`, run diagnosis and fix-oriented recipes in write mode by default unless the user explicitly asked for read-only behavior.
+In `/opencode:rescue`, the command chooses the read-only `plan` agent or the write-capable `build` agent. A recipe does not change that choice.
 
 ## Diagnosis
 

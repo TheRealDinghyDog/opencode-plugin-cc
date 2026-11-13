@@ -1,6 +1,6 @@
 {
   "name": "opencode-plugin-cc",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "author": "TheRealDinghyDog",
   "private": true,
   "files": [
@@ -15,7 +15,7 @@
   "scripts": {
     "bump-version": "node scripts/bump-version.mjs",
     "canary": "node scripts/opencode-canary.mjs",
-    "check-allowed-tools": "node scripts/check-allowed-tools.mjs",
+    "check-directory-policy": "node scripts/check-directory-policy.mjs",
     "check-version": "node scripts/bump-version.mjs --check",
     "test": "node --test tests/*.test.mjs"
   },

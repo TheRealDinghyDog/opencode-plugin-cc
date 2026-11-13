@@ -1,41 +1,55 @@
 ---
-description: Check whether the local OpenCode CLI is ready and optionally toggle the fail-closed stop-time review gate
-argument-hint: '[--enable-review-gate|--disable-review-gate]'
-allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" *), Bash(npm install -g opencode-ai), AskUserQuestion
+description: Check whether the local OpenCode CLI is installed, supported and logged in
 ---
 
-Run:
+Check that the user's own `opencode` CLI is ready for this plugin.
+
+This command works only in Claude Code running on the user's own computer, where their OpenCode is installed. In claude.ai chat, the Claude apps or Cowork, any shell you have is a sandbox that does not hold the user's OpenCode or their logins: say that this plugin needs Claude Code, and stop. Do not run or install anything there.
+
+Raw slash-command arguments:
+$ARGUMENTS
+
+If the arguments mention `--enable-review-gate` or `--disable-review-gate`: say that the stop-time review gate was removed in version 2.0.0 and no longer runs, and continue with the checks.
+
+## Rules for every OpenCode call
+
+- Use only the `opencode` invocations written in this file. If one fails with an unknown option or an unknown command, or prints OpenCode's help text instead of doing what was asked, stop: show the user the exact output and the output of `opencode --version`, and say the plugin may not support that OpenCode version yet. Do not try other flags or subcommands.
+- Never print a credential. `opencode auth list` shows provider names only; do not run anything that prints stored secrets.
+
+## 1. Is OpenCode installed?
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" setup --json $ARGUMENTS
+opencode --version
 ```
 
-If the result says the installed OpenCode version is unsupported (`opencode.unsupported` is true):
-- Do not offer to install OpenCode; an npm install can collide with the existing `opencode` binary.
-- Present the setup output's guidance for switching to a supported OpenCode version.
-
-If the result says OpenCode is unavailable (and not unsupported) and npm is available:
-- Use `AskUserQuestion` exactly once to ask whether Claude should install OpenCode now.
-- Put the install option first and suffix it with `(Recommended)`.
-- Use these two options:
-  - `Install OpenCode (Recommended)`
-  - `Skip for now`
-- If the user chooses install, run:
+- If the command is not found, and `npm --version` works: use `AskUserQuestion` exactly once to ask whether to install OpenCode now, with `Install OpenCode (Recommended)` and `Skip for now`. If the user chooses to install, run:
 
 ```bash
 npm install -g opencode-ai
 ```
 
-- Then rerun:
+  Then run `opencode --version` again.
+- If npm is not available either, do not ask. Tell the user to install OpenCode from https://opencode.ai and run `/opencode:setup` again.
+
+## 2. Is the version supported?
+
+- The first number of the version is the major version. 1 and 2 are supported.
+- For any other major version, say that this plugin has not been tested with it, and stop. Do not offer to install another copy; it can collide with the existing `opencode` binary.
+
+## 3. Is a provider logged in?
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-companion.mjs" setup --json $ARGUMENTS
+opencode auth list
 ```
 
-If OpenCode is already installed or npm is unavailable:
-- Do not ask about installation.
+- If no credential is listed, the plugin cannot confirm that OpenCode can reach a model. A provider set up through an environment variable or a local server may still work. Tell the user to log in from their own terminal with `opencode auth login`, which is interactive, and to run `/opencode:setup` again afterwards.
+- OpenCode 1.x and 2.x keep separate logins. A login made in one does not appear in the other.
 
-Output rules:
-- Present the final setup output to the user.
-- If installation was skipped, present the original setup output.
-- If OpenCode is installed but not configured, preserve the setup output's provider guidance.
+## Report
+
+Tell the user, briefly:
+
+- the OpenCode version and whether it is supported,
+- the providers that are logged in, by name,
+- whether the plugin is ready, and if not, the one thing to do next,
+- that each OpenCode run asks for permission, and that they can stop the prompt for review and read-only runs by adding `Bash(opencode run --agent plan *)` to the `permissions.allow` list in their own Claude Code settings (`Bash(opencode run --agent build *)` does the same for runs that can edit files). Say plainly what that rule gives up: those runs are read-only by instruction, not by force. OpenCode blocks the `plan` agent's edit tools, but the agent can still run shell commands, so the prompt is the only checkpoint before a run starts. The rule also allows any further flags on that line; the plugin never adds `--auto`. Do not edit their settings yourself.

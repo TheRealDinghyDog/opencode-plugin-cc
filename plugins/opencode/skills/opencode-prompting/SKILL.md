@@ -6,7 +6,7 @@ user-invocable: false
 
 # OpenCode Prompting
 
-Use this skill when `opencode:opencode-rescue` needs to tighten a user request before delegating it to OpenCode.
+Use this skill when `/opencode:rescue` needs to tighten a user request before handing it to OpenCode.
 
 Prompt OpenCode like an operator, not a collaborator. Keep prompts compact and block-structured with XML tags. State the task, the output contract, the follow-through defaults, and the small set of extra constraints that matter. Do not assume a specific provider or model family; the prompt should work across OpenCode's configured model unless the user explicitly selected one.
 
@@ -31,9 +31,9 @@ When to add blocks:
 - Write-capable tasks: add `action_safety` so OpenCode stays narrow and avoids unrelated refactors.
 
 How to choose prompt shape:
-- Use built-in `review` or `adversarial-review` commands when the job is reviewing local git changes. Those prompts already carry the review contract.
-- Use `task` when the task is diagnosis, planning, research, or implementation and you need to control the prompt more directly.
-- Use `task --resume-last` for follow-up instructions on the same OpenCode thread. Send only the delta instruction instead of restating the whole prompt unless the direction changed materially.
+- When the job is reviewing local git changes, point the user to `/opencode:review` or `/opencode:adversarial-review`. Only the user can start them, and their prompts already carry the review contract.
+- Use `/opencode:rescue` when the task is diagnosis, planning, research, or implementation and you need to control the prompt more directly.
+- Use `/opencode:rescue --resume` for follow-up instructions on the same OpenCode session. Send only the delta instruction instead of restating the whole prompt unless the direction changed materially.
 
 Working rules:
 - Prefer explicit prompt contracts over vague nudges.
