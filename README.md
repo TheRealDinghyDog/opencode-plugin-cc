@@ -16,6 +16,27 @@ they already have.
 - `/opencode:adversarial-review` for a steerable challenge review
 - `/opencode:rescue`, `/opencode:transfer`, `/opencode:status`, `/opencode:result`, and `/opencode:cancel` to delegate work, hand off sessions, and manage background jobs
 
+## Editions
+
+The plugin comes in two editions. They share a name, a version and the `/opencode:` commands, so install one of them, not both.
+
+| | Full plugin | Directory edition |
+|---|---|---|
+| Installed from | this repository's marketplace ([Install](#install)) | Anthropic's plugin directory |
+| Folder | [`plugins/opencode-full`](plugins/opencode-full) | [`plugins/opencode`](plugins/opencode) |
+| How it runs OpenCode | its own Node.js companion and a local `opencode serve` | instructions that have Claude run your `opencode` CLI, with Claude Code's permission prompt for each run |
+| `/opencode:review`, `/opencode:adversarial-review`, `/opencode:rescue` | yes | yes |
+| `/opencode:status`, `/opencode:result`, `/opencode:cancel` | yes, from the plugin's own job store | yes, from Claude Code's background tasks and OpenCode's session list |
+| Review output | JSON checked against a schema, then rendered | a Markdown report in a fixed layout |
+| `/opencode:transfer` | yes | no |
+| Stop-time review gate | yes | no |
+| `opencode-rescue` subagent | yes | no |
+| Needs Node.js | yes | no |
+
+Why there are two: since November 2026 the plugin directory accepts only instruction files from community publishers. Scripts, hooks, inline shell and pre-approved shell access are refused, and those are what the full plugin is built from. The directory edition is the plugin rebuilt inside that rule. It has no code, so what it can do is what Claude can do by following its instructions with your own OpenCode. Its README is [plugins/opencode/README.md](plugins/opencode/README.md).
+
+The rest of this README describes the full plugin.
+
 ## Requirements
 
 - **A working local OpenCode install and provider configuration.**
@@ -34,6 +55,8 @@ they already have.
 The plugin starts its own local `opencode serve` on demand, bound to `127.0.0.1` and protected with a per-server random password (HTTP Basic auth), so other local processes cannot reach its API. If you point the plugin at your own server via `OPENCODE_COMPANION_SERVER_URL` and that server is password-protected, also export `OPENCODE_SERVER_PASSWORD` (and `OPENCODE_SERVER_USERNAME` if you customized it).
 
 ## Install
+
+These steps install the full plugin. If you already have the directory edition, remove it first.
 
 Add the marketplace in Claude Code:
 

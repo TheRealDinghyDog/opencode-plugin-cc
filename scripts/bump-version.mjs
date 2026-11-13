@@ -38,6 +38,21 @@ const TARGETS = [
       }
     ]
   },
+  // The two editions share one version: plugins/opencode is the instruction-only
+  // edition the plugin directory reads, plugins/opencode-full the full plugin
+  // this repository's own marketplace installs.
+  {
+    file: "plugins/opencode/.claude-plugin/plugin.json",
+    values: [
+      {
+        label: "version",
+        get: (json) => json.version,
+        set: (json, version) => {
+          json.version = version;
+        }
+      }
+    ]
+  },
   {
     file: "plugins/opencode-full/.claude-plugin/plugin.json",
     values: [

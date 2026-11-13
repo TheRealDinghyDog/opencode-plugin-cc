@@ -55,6 +55,8 @@ test("npm pack ships only the plugin artifact", (t) => {
 
   assert.equal(files.includes(".claude/settings.local.json"), false);
   assert.equal(files.some((file) => file.startsWith("tests/")), false);
+  assert.equal(files.includes("plugins/opencode/.claude-plugin/plugin.json"), true);
+  assert.equal(files.includes("plugins/opencode/commands/review.md"), true);
   assert.equal(files.includes("plugins/opencode-full/.claude-plugin/plugin.json"), true);
   assert.equal(files.includes("plugins/opencode-full/hooks/hooks.json"), true);
   assert.equal(files.includes("plugins/opencode-full/prompts/stop-review-gate.md"), true);

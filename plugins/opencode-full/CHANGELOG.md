@@ -1,5 +1,13 @@
 # Changelog
 
+This is the changelog of the full plugin. The directory edition keeps its own in `plugins/opencode/CHANGELOG.md`.
+
+## 2.0.0
+
+- **Two editions.** The plugin directory now accepts only instruction files from community publishers, so the directory lists a new instruction-only edition. This full plugin (companion runtime, hooks, review gate, transfer) is what this repository's own marketplace installs. See "Editions" in the repository README.
+- **The full plugin moved** from `plugins/opencode` to `plugins/opencode-full`. The marketplace entry points at the new folder, so an existing install from this marketplace updates in place.
+- **No change in behaviour** from 1.1.1. The major version marks the split, and both editions carry the same version from here on.
+
 ## 1.1.1
 
 - The prompting skill is now `opencode-prompting`. It was still named `gpt-5-4-prompting`, after the Codex plugin this one started from.

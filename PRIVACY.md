@@ -1,11 +1,13 @@
 # Privacy Policy
 
 **Plugin:** opencode (opencode-plugin-cc)
-**Last updated:** 2026-07-13
+**Last updated:** 2026-11-13
 
 ## Summary
 
 This plugin runs entirely on your machine. It collects no data, sends no telemetry, and transmits nothing to the plugin author or any third party of its own. The only place your code or prompts travel is to the AI providers **you** have configured in your own OpenCode installation.
+
+This policy covers both editions of the plugin. The directory edition has no code of its own: it keeps no state and starts no server, and the sections on job records and server state below apply to the full plugin only. Its runs are ordinary `opencode` commands that Claude Code asks you to approve.
 
 ## What the plugin does with your data
 
