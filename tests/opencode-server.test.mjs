@@ -9,7 +9,7 @@ import {
   fetchWithCause,
   OpencodeServerClient,
   parseOpencodeVersionInfo
-} from "../plugins/opencode/scripts/lib/opencode-server.mjs";
+} from "../plugins/opencode-full/scripts/lib/opencode-server.mjs";
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {

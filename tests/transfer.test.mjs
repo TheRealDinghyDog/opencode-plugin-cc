@@ -7,14 +7,14 @@ import { fileURLToPath } from "node:url";
 import {
   buildOpenCodeImportDocumentFromClaudeJsonl,
   buildOpenCodeV2ImportDocumentFromClaudeJsonl
-} from "../plugins/opencode/scripts/lib/claude-session-transfer.mjs";
-import { importExternalAgentSession } from "../plugins/opencode/scripts/lib/opencode.mjs";
+} from "../plugins/opencode-full/scripts/lib/claude-session-transfer.mjs";
+import { importExternalAgentSession } from "../plugins/opencode-full/scripts/lib/opencode.mjs";
 import { buildEnv, installFakeOpencode, readFakeState } from "./fake-opencode-fixture.mjs";
 import { installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
 import { makeTempDir, run } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PLUGIN_ROOT = path.join(ROOT, "plugins", "opencode");
+const PLUGIN_ROOT = path.join(ROOT, "plugins", "opencode-full");
 const SCRIPT = path.join(PLUGIN_ROOT, "scripts", "opencode-companion.mjs");
 
 function sequentialIds() {

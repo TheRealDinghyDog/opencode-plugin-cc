@@ -10,7 +10,7 @@ import {
   loadServerSession,
   saveServerSession,
   teardownServerSession
-} from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+} from "../plugins/opencode-full/scripts/lib/server-lifecycle.mjs";
 import { installFakeOpencode } from "./fake-opencode-fixture.mjs";
 import { installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
 import { makeTempDir } from "./helpers.mjs";

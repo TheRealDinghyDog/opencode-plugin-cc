@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { makeTempDir, run } from "./helpers.mjs";
-import { runTrackedJob } from "../plugins/opencode/scripts/lib/tracked-jobs.mjs";
-import { loadServerSession, saveServerSession } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+import { runTrackedJob } from "../plugins/opencode-full/scripts/lib/tracked-jobs.mjs";
+import { loadServerSession, saveServerSession } from "../plugins/opencode-full/scripts/lib/server-lifecycle.mjs";
 import {
   applyJobPatch,
   loadState,
@@ -17,11 +17,11 @@ import {
   saveState,
   updateState,
   writeJobFile
-} from "../plugins/opencode/scripts/lib/state.mjs";
+} from "../plugins/opencode-full/scripts/lib/state.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const STATE_MODULE_URL = pathToFileURL(path.join(ROOT, "plugins", "opencode", "scripts", "lib", "state.mjs")).href;
-const COMPANION = path.join(ROOT, "plugins", "opencode", "scripts", "opencode-companion.mjs");
+const STATE_MODULE_URL = pathToFileURL(path.join(ROOT, "plugins", "opencode-full", "scripts", "lib", "state.mjs")).href;
+const COMPANION = path.join(ROOT, "plugins", "opencode-full", "scripts", "opencode-companion.mjs");
 
 async function withPluginData(pluginDataDir, fn) {
   const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;

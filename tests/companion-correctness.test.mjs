@@ -4,11 +4,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { listJobs, saveState } from "../plugins/opencode/scripts/lib/state.mjs";
+import { listJobs, saveState } from "../plugins/opencode-full/scripts/lib/state.mjs";
 import { makeTempDir, run } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SCRIPT = path.join(ROOT, "plugins", "opencode", "scripts", "opencode-companion.mjs");
+const SCRIPT = path.join(ROOT, "plugins", "opencode-full", "scripts", "opencode-companion.mjs");
 const STOP_REVIEW_PROMPT_TEXT = "Run a stop-gate review of the previous Claude turn.";
 
 function withPluginData(pluginData, fn) {

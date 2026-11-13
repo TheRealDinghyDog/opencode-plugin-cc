@@ -8,9 +8,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { OpencodeHttpError, OpencodeServerClient } from "../plugins/opencode/scripts/lib/opencode-server.mjs";
-import { captureTurnForTest } from "../plugins/opencode/scripts/lib/opencode.mjs";
-import { captureV2Turn, resolveTurnTimeoutMs } from "../plugins/opencode/scripts/lib/turn-capture-v2.mjs";
+import { OpencodeHttpError, OpencodeServerClient } from "../plugins/opencode-full/scripts/lib/opencode-server.mjs";
+import { captureTurnForTest } from "../plugins/opencode-full/scripts/lib/opencode.mjs";
+import { captureV2Turn, resolveTurnTimeoutMs } from "../plugins/opencode-full/scripts/lib/turn-capture-v2.mjs";
 
 const RECORDINGS = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "opencode-v2-recordings");
 const FAST = { serverGoneMs: 300, streamDropPollIntervalMs: 50, streamDropGraceMs: 50, recoveryTimeoutMs: 200, eventOpenTimeoutMs: 1000 };

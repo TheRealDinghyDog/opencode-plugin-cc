@@ -11,7 +11,7 @@ import {
   runExecutable,
   terminateProcessTree,
   terminateTaskWorkerProcessTree
-} from "../plugins/opencode/scripts/lib/process.mjs";
+} from "../plugins/opencode-full/scripts/lib/process.mjs";
 
 test("terminateProcessTree uses taskkill on Windows", () => {
   let captured = null;
@@ -103,7 +103,7 @@ test("terminateTaskWorkerProcessTree keeps process-group termination for matchin
         status: 0,
         signal: null,
         stdout:
-          'node /repo/plugins/opencode/scripts/opencode-companion.mjs task-worker --cwd /repo --job-id "job-expected"\n',
+          'node /repo/plugins/opencode-full/scripts/opencode-companion.mjs task-worker --cwd /repo --job-id "job-expected"\n',
         stderr: "",
         error: null
       };
@@ -130,7 +130,7 @@ test("terminateTaskWorkerProcessTree ends only the worker on Windows", () => {
       calls.push({ command, args });
       const stdout =
         command === "powershell.exe"
-          ? 'node C:/repo/plugins/opencode/scripts/opencode-companion.mjs task-worker --cwd C:/repo --job-id job-expected\r\n'
+          ? 'node C:/repo/plugins/opencode-full/scripts/opencode-companion.mjs task-worker --cwd C:/repo --job-id job-expected\r\n'
           : "SUCCESS: The process with PID 1234 has been terminated.\r\n";
       return { command, args, status: 0, signal: null, stdout, stderr: "", error: null };
     },

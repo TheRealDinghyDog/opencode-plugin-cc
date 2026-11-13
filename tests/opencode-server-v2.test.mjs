@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { OpencodeV2Client } from "../plugins/opencode/scripts/lib/opencode-server-v2.mjs";
+import { OpencodeV2Client } from "../plugins/opencode-full/scripts/lib/opencode-server-v2.mjs";
 import { installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
 import { readFakeState } from "./fake-opencode-fixture.mjs";
 import { makeTempDir } from "./helpers.mjs";

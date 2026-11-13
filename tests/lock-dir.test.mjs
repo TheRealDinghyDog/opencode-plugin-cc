@@ -11,7 +11,7 @@ import {
   releaseLock,
   stealStaleLock,
   tryCreateLock
-} from "../plugins/opencode/scripts/lib/lock-dir.mjs";
+} from "../plugins/opencode-full/scripts/lib/lock-dir.mjs";
 import { makeTempDir } from "./helpers.mjs";
 
 function lockPath() {

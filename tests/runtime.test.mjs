@@ -6,14 +6,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { interruptServerTurn, runServerTurn } from "../plugins/opencode/scripts/lib/opencode.mjs";
-import { loadServerSession, saveServerSession, SERVER_URL_ENV } from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
-import { resolveJobLogFile, resolveStateDir, resolveStateFile, saveState, writeJobFile } from "../plugins/opencode/scripts/lib/state.mjs";
+import { interruptServerTurn, runServerTurn } from "../plugins/opencode-full/scripts/lib/opencode.mjs";
+import { loadServerSession, saveServerSession, SERVER_URL_ENV } from "../plugins/opencode-full/scripts/lib/server-lifecycle.mjs";
+import { resolveJobLogFile, resolveStateDir, resolveStateFile, saveState, writeJobFile } from "../plugins/opencode-full/scripts/lib/state.mjs";
 import { buildEnv, installFakeOpencode, readFakeState, readServerBootCount } from "./fake-opencode-fixture.mjs";
 import { initGitRepo, makeTempDir, run, writeExecutable } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PLUGIN_ROOT = path.join(ROOT, "plugins", "opencode");
+const PLUGIN_ROOT = path.join(ROOT, "plugins", "opencode-full");
 const SCRIPT = path.join(PLUGIN_ROOT, "scripts", "opencode-companion.mjs");
 const SESSION_HOOK = path.join(PLUGIN_ROOT, "scripts", "session-lifecycle-hook.mjs");
 const STOP_HOOK = path.join(PLUGIN_ROOT, "scripts", "stop-review-gate-hook.mjs");
@@ -1740,7 +1740,7 @@ test("an external server bypasses the local CLI's unsupported-major gate", async
   await withProcessEnv(
     { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`, FAKE_OPENCODE_VERSION_OUTPUT: "opencode v3.0.0" },
     async () => {
-      const { getOpencodeAvailability } = await import("../plugins/opencode/scripts/lib/opencode.mjs");
+      const { getOpencodeAvailability } = await import("../plugins/opencode-full/scripts/lib/opencode.mjs");
       const local = getOpencodeAvailability(workspace, {});
       assert.equal(local.available, false);
       assert.equal(local.unsupported, true);

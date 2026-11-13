@@ -14,10 +14,10 @@ import {
   loadServerSession,
   saveServerSession,
   teardownServerSession
-} from "../plugins/opencode/scripts/lib/server-lifecycle.mjs";
+} from "../plugins/opencode-full/scripts/lib/server-lifecycle.mjs";
 import { installFakeOpencode } from "./fake-opencode-fixture.mjs";
-import { resolveStateDir } from "../plugins/opencode/scripts/lib/state.mjs";
-import { commandLineLooksLikeOpencodeServe, readProcessCommandLine } from "../plugins/opencode/scripts/lib/process.mjs";
+import { resolveStateDir } from "../plugins/opencode-full/scripts/lib/state.mjs";
+import { commandLineLooksLikeOpencodeServe, readProcessCommandLine } from "../plugins/opencode-full/scripts/lib/process.mjs";
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {

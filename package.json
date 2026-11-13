@@ -4,7 +4,7 @@
   "author": "TheRealDinghyDog",
   "private": true,
   "files": [
-    "plugins/opencode/"
+    "plugins/opencode-full/"
   ],
   "type": "module",
   "description": "Use OpenCode from Claude Code to review code or delegate tasks.",

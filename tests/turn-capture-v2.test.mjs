@@ -10,7 +10,7 @@ import {
   createV2TurnState,
   recoverV2Turn,
   setV2PromptID
-} from "../plugins/opencode/scripts/lib/turn-capture-v2.mjs";
+} from "../plugins/opencode-full/scripts/lib/turn-capture-v2.mjs";
 
 const RECORDINGS = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "opencode-v2-recordings");
 

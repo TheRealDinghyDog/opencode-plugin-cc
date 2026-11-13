@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { renderReviewResult, renderStoredJobResult, renderTaskResult } from "../plugins/opencode/scripts/lib/render.mjs";
+import { renderReviewResult, renderStoredJobResult, renderTaskResult } from "../plugins/opencode-full/scripts/lib/render.mjs";
 
 test("renderReviewResult degrades gracefully when JSON is missing required review fields", () => {
   const output = renderReviewResult(

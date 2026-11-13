@@ -15,7 +15,7 @@ import {
   setConfig,
   withStateLock,
   withStateLockAsync
-} from "../plugins/opencode/scripts/lib/state.mjs";
+} from "../plugins/opencode-full/scripts/lib/state.mjs";
 
 function withoutPluginData(fn) {
   const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;

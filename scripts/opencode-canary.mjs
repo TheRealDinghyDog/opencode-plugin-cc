@@ -19,12 +19,12 @@ import process from "node:process";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { parseOpencodeVersionInfo } from "../plugins/opencode/scripts/lib/opencode-server.mjs";
-import { readProcessCommandLine } from "../plugins/opencode/scripts/lib/process.mjs";
+import { parseOpencodeVersionInfo } from "../plugins/opencode-full/scripts/lib/opencode-server.mjs";
+import { readProcessCommandLine } from "../plugins/opencode-full/scripts/lib/process.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const COMPANION = path.join(ROOT, "plugins", "opencode", "scripts", "opencode-companion.mjs");
-const SESSION_HOOK = path.join(ROOT, "plugins", "opencode", "scripts", "session-lifecycle-hook.mjs");
+const COMPANION = path.join(ROOT, "plugins", "opencode-full", "scripts", "opencode-companion.mjs");
+const SESSION_HOOK = path.join(ROOT, "plugins", "opencode-full", "scripts", "session-lifecycle-hook.mjs");
 const CONTRACT_FILES = {
   1: path.join(ROOT, "tests", "opencode-event-contract.json"),
   2: path.join(ROOT, "tests", "opencode-v2-contract.json")

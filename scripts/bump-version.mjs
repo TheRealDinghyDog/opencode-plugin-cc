@@ -39,7 +39,7 @@ const TARGETS = [
     ]
   },
   {
-    file: "plugins/opencode/.claude-plugin/plugin.json",
+    file: "plugins/opencode-full/.claude-plugin/plugin.json",
     values: [
       {
         label: "version",

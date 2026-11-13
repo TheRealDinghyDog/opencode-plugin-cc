@@ -5,9 +5,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { extractJsonObject } from "../plugins/opencode/scripts/lib/opencode.mjs";
-import { saveState } from "../plugins/opencode/scripts/lib/state.mjs";
-import { HEADLESS_PERMISSION_MESSAGE } from "../plugins/opencode/scripts/lib/turn-capture-v2.mjs";
+import { extractJsonObject } from "../plugins/opencode-full/scripts/lib/opencode.mjs";
+import { saveState } from "../plugins/opencode-full/scripts/lib/state.mjs";
+import { HEADLESS_PERMISSION_MESSAGE } from "../plugins/opencode-full/scripts/lib/turn-capture-v2.mjs";
 import { readFakeState } from "./fake-opencode-fixture.mjs";
 import { FAKE_SECRET, installFakeOpencodeV2 } from "./fake-opencode-v2-fixture.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
@@ -16,7 +16,7 @@ import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 // (issues #52, #53). 2.x is enabled through the development switch until
 // #56 turns it on by default.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PLUGIN_ROOT = path.join(ROOT, "plugins", "opencode");
+const PLUGIN_ROOT = path.join(ROOT, "plugins", "opencode-full");
 const SCRIPT = path.join(PLUGIN_ROOT, "scripts", "opencode-companion.mjs");
 const SESSION_HOOK = path.join(PLUGIN_ROOT, "scripts", "session-lifecycle-hook.mjs");
 const STOP_HOOK = path.join(PLUGIN_ROOT, "scripts", "stop-review-gate-hook.mjs");

@@ -3,8 +3,8 @@ import net from "node:net";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { OpencodeServerClient } from "../plugins/opencode/scripts/lib/opencode-server.mjs";
-import { captureTurnForTest } from "../plugins/opencode/scripts/lib/opencode.mjs";
+import { OpencodeServerClient } from "../plugins/opencode-full/scripts/lib/opencode-server.mjs";
+import { captureTurnForTest } from "../plugins/opencode-full/scripts/lib/opencode.mjs";
 
 async function canListenLocalhost() {
   return new Promise((resolve) => {

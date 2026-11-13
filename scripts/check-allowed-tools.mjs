@@ -17,7 +17,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PLUGIN_SOURCE = path.join(ROOT, "plugins", "opencode");
+const PLUGIN_SOURCE = path.join(ROOT, "plugins", "opencode-full");
 const DENIED = "Shell command permission check failed";
 const TIMEOUT_MS = 90_000;
 
