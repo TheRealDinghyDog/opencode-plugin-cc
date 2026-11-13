@@ -6,9 +6,9 @@ on:
   # main — and main is what the community-marketplace catalog pins. Test it
   # directly on every push. Release branches (release/1.1.0 and later) collect
   # a milestone's PRs before one release PR to main, so test what lands there
-  # too.
+  # too. The `full` branch is where this code line is released from.
   push:
-    branches: [main, "release/**"]
+    branches: [main, full, "release/**"]
 
 permissions:
   contents: read

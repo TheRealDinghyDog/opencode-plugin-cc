@@ -8,6 +8,9 @@ they already have.
 > [!NOTE]
 > This is an independent community project. It is not affiliated with or endorsed by the OpenCode project, Anthropic, or OpenAI.
 
+> [!IMPORTANT]
+> This is the `full` branch. It holds the 1.x line of the plugin, which ships code: a Node.js companion, hooks and a local `opencode serve`. Since November 2026 Anthropic's plugin directory accepts only instruction files from community publishers, so the directory and this repository's `main` branch carry an instruction-only version (2.x) instead. That version has no stop-time review gate, no `/opencode:transfer` and no `opencode-rescue` subagent; this one does. Both are named `opencode`, so use one of them, not both.
+
 <video src="./docs/plugin-demo.webm" controls muted playsinline autoplay></video>
 
 ## What You Get
@@ -35,11 +38,16 @@ The plugin starts its own local `opencode serve` on demand, bound to `127.0.0.1`
 
 ## Install
 
-Add the marketplace in Claude Code:
+Add this branch as a marketplace in Claude Code:
 
 ```bash
-/plugin marketplace add TheRealDinghyDog/opencode-plugin-cc
+/plugin marketplace add TheRealDinghyDog/opencode-plugin-cc#full
 ```
+
+If you already have the plugin, take it out first, because Claude Code keeps one marketplace per name and both versions answer to `/opencode:`:
+
+- Installed from this repository's `main` branch: `/plugin marketplace remove opencode`. This uninstalls the plugin and deletes its saved data.
+- Installed from Anthropic's plugin directory: uninstall it in `/plugin`.
 
 Install the plugin:
 
