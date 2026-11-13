@@ -13,6 +13,14 @@ It is an independent community project, not affiliated with or endorsed by the O
 
 Run `/opencode:setup` to check both.
 
+## Install
+
+Install it from Anthropic's plugin directory, or in Claude Code:
+
+```
+/plugin install opencode --marketplace TheRealDinghyDog/opencode-plugin-cc
+```
+
 ## Commands
 
 | Command | What it does |
