@@ -1,64 +1,35 @@
 # OpenCode plugin for Claude Code
 
-Use OpenCode from inside Claude Code for code reviews or to delegate tasks to OpenCode.
+Use OpenCode from inside Claude Code to review code or hand a task to another model.
 
-This plugin is for Claude Code users who want an easy way to start using OpenCode from the workflow
-they already have.
+The plugin holds instructions only. Its commands tell Claude which `opencode` command line to run with the OpenCode you already have, and Claude Code asks you before each run. It ships no scripts and no hooks, and it downloads nothing unless you accept `/opencode:setup`'s offer to install OpenCode.
 
 > [!NOTE]
 > This is an independent community project. It is not affiliated with or endorsed by the OpenCode project, Anthropic, or OpenAI.
 
-<video src="./docs/plugin-demo.webm" controls muted playsinline autoplay></video>
-
 ## What You Get
 
-- `/opencode:review` for a normal read-only OpenCode review
-- `/opencode:adversarial-review` for a steerable challenge review
-- `/opencode:rescue`, `/opencode:transfer`, `/opencode:status`, `/opencode:result`, and `/opencode:cancel` to delegate work, hand off sessions, and manage background jobs
-
-## Editions
-
-The plugin comes in two editions. They share a name, a version and the `/opencode:` commands, so install one of them, not both.
-
-| | Full plugin | Directory edition |
-|---|---|---|
-| Installed from | this repository's marketplace ([Install](#install)) | Anthropic's plugin directory |
-| Folder | [`plugins/opencode-full`](plugins/opencode-full) | [`plugins/opencode`](plugins/opencode) |
-| How it runs OpenCode | its own Node.js companion and a local `opencode serve` | instructions that have Claude run your `opencode` CLI, with Claude Code's permission prompt for each run |
-| `/opencode:review`, `/opencode:adversarial-review`, `/opencode:rescue` | yes | yes |
-| `/opencode:status`, `/opencode:result`, `/opencode:cancel` | yes, from the plugin's own job store | yes, from Claude Code's background tasks and OpenCode's session list |
-| Review output | JSON checked against a schema, then rendered | a Markdown report in a fixed layout |
-| `/opencode:transfer` | yes | no |
-| Stop-time review gate | yes | no |
-| `opencode-rescue` subagent | yes | no |
-| Needs Node.js | yes | no |
-
-Why there are two: since November 2026 the plugin directory accepts only instruction files from community publishers. Scripts, hooks, inline shell and pre-approved shell access are refused, and those are what the full plugin is built from. The directory edition is the plugin rebuilt inside that rule. It has no code, so what it can do is what Claude can do by following its instructions with your own OpenCode. Its README is [plugins/opencode/README.md](plugins/opencode/README.md).
-
-The rest of this README describes the full plugin.
+- `/opencode:review` for a read-only OpenCode review
+- `/opencode:adversarial-review` for a steerable review that challenges the approach
+- `/opencode:rescue` to hand a task to OpenCode: investigate, fix, or continue an earlier task
+- `/opencode:status`, `/opencode:result` and `/opencode:cancel` to follow, read and stop runs
+- `/opencode:setup` to check that OpenCode is installed, supported and logged in
 
 ## Requirements
 
-- **A working local OpenCode install and provider configuration.**
-  - Usage is billed by whichever OpenCode provider/model you select.
-  - Supported OpenCode versions:
+- **Claude Code on your own computer.** The commands need a shell on the machine where your OpenCode is installed, so they do nothing useful in claude.ai chat or Cowork.
+- **OpenCode 1.x or 2.x**, installed and logged in to at least one provider. Usage is billed by the provider and model you select in OpenCode.
 
-    | OpenCode | Status | Installed by |
-    |---|---|---|
-    | 1.x | Supported | `npm install -g opencode-ai`, the `opencode.ai/install` script, OpenCode's Homebrew tap (`brew install anomalyco/tap/opencode`), Scoop, Chocolatey |
-    | 2.x | **Experimental** | the core Homebrew formula (`brew install opencode`) |
-    | later | Refused until tested | |
+  | OpenCode | Installed by |
+  |---|---|
+  | 1.x | `npm install -g opencode-ai`, the `opencode.ai/install` script, OpenCode's Homebrew tap (`brew install anomalyco/tap/opencode`), Scoop, Chocolatey |
+  | 2.x | the core Homebrew formula (`brew install opencode`) |
 
-    2.x replaced the server API that 1.x uses, so the plugin drives each through its own client and picks the right one automatically. 2.x support has been tested against a real 2.x server on macOS only; on Linux and Windows it has run only against the plugin's own fake 2.x server in CI. See [OpenCode 2.x](#opencode-2x).
-- **Node.js 18.18 or later**
-
-The plugin starts its own local `opencode serve` on demand, bound to `127.0.0.1` and protected with a per-server random password (HTTP Basic auth), so other local processes cannot reach its API. If you point the plugin at your own server via `OPENCODE_COMPANION_SERVER_URL` and that server is password-protected, also export `OPENCODE_SERVER_PASSWORD` (and `OPENCODE_SERVER_USERNAME` if you customized it).
+  A later major version is not supported until its command line has been checked. `/opencode:setup` says so, and every command stops and shows you OpenCode's output if OpenCode rejects an option.
 
 ## Install
 
-These steps install the full plugin. If you already have the directory edition, remove it first.
-
-Add the marketplace in Claude Code:
+Install it from Anthropic's plugin directory, or add this repository as a marketplace in Claude Code:
 
 ```bash
 /plugin marketplace add TheRealDinghyDog/opencode-plugin-cc
@@ -82,22 +53,15 @@ Then run:
 /opencode:setup
 ```
 
-`/opencode:setup` will tell you whether OpenCode is ready. If OpenCode is missing and npm is available, it can offer to install OpenCode for you.
-
-If you prefer to install OpenCode yourself, use:
+`/opencode:setup` tells you whether OpenCode is ready. If OpenCode is missing and npm is available, it offers to install it and asks first. To install OpenCode yourself:
 
 ```bash
 npm install -g opencode-ai
 ```
 
-If OpenCode is installed but no provider is configured yet, follow your OpenCode provider setup flow and rerun `/opencode:setup`.
+If OpenCode is installed but no provider is logged in, run `opencode auth login` and then `/opencode:setup` again.
 
-After install, you should see:
-
-- the slash commands listed below
-- the `opencode:opencode-rescue` subagent in `/agents`
-
-One simple first run is:
+A simple first run is:
 
 ```bash
 /opencode:review --background
@@ -109,17 +73,17 @@ One simple first run is:
 
 ### `/opencode:review`
 
-Runs a normal OpenCode review on your current work. It gives you the same quality of code review as running `/review` inside OpenCode directly.
+Runs an OpenCode review of your current work.
 
 > [!NOTE]
-> Code review especially for multi-file changes might take a while. It's generally recommended to run it in the background.
+> A review of a change that spans many files can take a while. Run it in the background when it does.
 
 Use it when you want:
 
-- a review of your current uncommitted changes
+- a review of your uncommitted changes
 - a review of your branch compared to a base branch like `main`
 
-Use `--base <ref>` for branch review. It also supports `--wait` and `--background`. It is not steerable and does not take custom focus text. Use [`/opencode:adversarial-review`](#opencodeadversarial-review) when you want to challenge a specific decision or risk area.
+Use `--base <ref>` for a branch review. It also takes `--wait` and `--background`; with neither, the command asks which you want. It does not take focus text. Use [`/opencode:adversarial-review`](#opencodeadversarial-review) to challenge a specific decision or risk area.
 
 Examples:
 
@@ -129,22 +93,13 @@ Examples:
 /opencode:review --background
 ```
 
-This command is read-only and will not perform any changes. When run in the background you can use [`/opencode:status`](#opencodestatus) to check on the progress and [`/opencode:cancel`](#opencodecancel) to cancel the ongoing task.
+The result is a Markdown report with a verdict, findings by severity and next steps. The command fixes nothing. See [What it runs](#what-it-runs) for what "read-only" means here.
 
 ### `/opencode:adversarial-review`
 
-Runs a **steerable** review that questions the chosen implementation and design.
+Runs a **steerable** review that questions the chosen implementation and design: assumptions, tradeoffs, failure modes, and whether a different approach would have been safer or simpler.
 
-It can be used to pressure-test assumptions, tradeoffs, failure modes, and whether a different approach would have been safer or simpler.
-
-It uses the same review target selection as `/opencode:review`, including `--base <ref>` for branch review.
-It also supports `--wait` and `--background`. Unlike `/opencode:review`, it can take extra focus text after the flags.
-
-Use it when you want:
-
-- a review before shipping that challenges the direction, not just the code details
-- review focused on design choices, tradeoffs, hidden assumptions, and alternative approaches
-- pressure-testing around specific risk areas like auth, data loss, rollback, race conditions, or reliability
+It selects what to review the same way `/opencode:review` does, takes the same flags, and can take focus text after them.
 
 Examples:
 
@@ -154,26 +109,23 @@ Examples:
 /opencode:adversarial-review --background look for race conditions and question the chosen approach
 ```
 
-This command is read-only. It does not fix code.
+This command fixes nothing either.
 
 ### `/opencode:rescue`
 
-Hands a task to OpenCode through the `opencode:opencode-rescue` subagent.
+Hands a task to OpenCode and returns what it says.
 
 Use it when you want OpenCode to:
 
 - investigate a bug
 - try a fix
-- continue a previous OpenCode task
+- continue an earlier OpenCode task
 - take a faster or cheaper pass with a smaller model
 
-> [!NOTE]
-> Depending on the task and the model you choose these tasks might take a long time and it's generally recommended to force the task to be in the background or move the agent to the background.
-
 > [!IMPORTANT]
-> Rescue tasks default to a write-capable run using OpenCode's stock `build` agent under your own OpenCode permission configuration. Permission categories OpenCode gates behind an approval prompt (external-directory access, `.env` reads, doom-loop protection) are automatically **denied** in these headless runs — the plugin never approves a gated request on your behalf. Note that OpenCode permissions are approval-level controls, not an operating-system sandbox; run the OpenCode server in a container or as a restricted user if you need a hard filesystem boundary.
+> A task runs OpenCode's stock `build` agent, which can edit files in the project, under your own OpenCode permission configuration. Ask for a read-only run and it uses the `plan` agent instead. The plugin never passes `--auto`, so OpenCode rejects any request it would otherwise ask you to approve, such as reading `.env` or touching files outside the project. OpenCode permissions are approval-level controls, not an operating-system sandbox.
 
-It supports `--background`, `--wait`, `--resume`, and `--fresh`. If you omit `--resume` and `--fresh`, the plugin can offer to continue the latest rescue thread for this repo.
+It takes `--background`, `--wait`, `--resume` and `--fresh`. With neither `--resume` nor `--fresh`, the command can offer to continue the latest task for this repository.
 
 Examples:
 
@@ -185,7 +137,7 @@ Examples:
 /opencode:rescue --background investigate the regression
 ```
 
-You can also just ask for a task to be delegated to OpenCode:
+You can also ask in plain words:
 
 ```text
 Ask OpenCode to redesign the database connection to be more resilient.
@@ -193,81 +145,44 @@ Ask OpenCode to redesign the database connection to be more resilient.
 
 **Notes:**
 
-- if you do not pass `--model` or `--effort`, OpenCode chooses its own defaults.
-- `--model` takes the `provider/model` form that `opencode models` lists, such as `deepseek/deepseek-flash`
-- follow-up rescue requests can continue the latest OpenCode task in the repo
-
-### `/opencode:transfer`
-
-Transfer imports the current Claude Code JSONL transcript into a resumable OpenCode session with visible user and assistant turn history. Use it when you started a debugging or implementation conversation in Claude Code and want to continue that same context directly in OpenCode.
-
-Examples:
-
-```bash
-/opencode:transfer
-/opencode:transfer --source ~/.claude/projects/-Users-me-repo/<session-id>.jsonl
-```
-
-The plugin's existing `SessionStart` hook supplies the current transcript path automatically; `--source` is available as a manual override.
+- Without `--model` or `--effort`, OpenCode uses its own defaults.
+- `--model` takes the `provider/model` form that `opencode models` lists, such as `deepseek/deepseek-flash`.
+- `--effort` is passed to OpenCode as the model's variant. On OpenCode 2.x it needs `--model` as well, because 2.x sets the variant on a specific model.
 
 ### `/opencode:status`
 
-Shows running and recent OpenCode jobs for the current repository.
-
-Examples:
+Lists running and recent OpenCode runs this plugin started in the current repository.
 
 ```bash
 /opencode:status
-/opencode:status task-abc123
+/opencode:status <session-id>
 ```
 
-Use it to:
-
-- check progress on background work
-- see the latest completed job
-- confirm whether a task is still running
+A run started with `--background` is a Claude Code background task, and status shows its latest progress. On OpenCode 2.x, status also asks OpenCode which sessions are running. On 1.x, a run that was not started in the current Claude Code conversation is shown as `unknown`, because 1.x has nothing to ask.
 
 ### `/opencode:result`
 
-Shows the final stored OpenCode output for a finished job.
-When available, it also includes the OpenCode session ID so you can reopen that run directly in OpenCode with `opencode --session <session-id>`.
-
-Examples:
+Shows the final answer of a finished run, with its OpenCode session ID.
 
 ```bash
 /opencode:result
-/opencode:result task-abc123
+/opencode:result <session-id>
 ```
 
 ### `/opencode:cancel`
 
-Cancels an active background OpenCode job.
-
-Examples:
+Stops a running one.
 
 ```bash
 /opencode:cancel
-/opencode:cancel task-abc123
+/opencode:cancel <session-id>
 ```
+
+On OpenCode 2.x, a session can outlive the command that started it. Cancel checks the session afterwards and interrupts it through OpenCode if it is still running.
 
 ### `/opencode:setup`
 
-Checks whether OpenCode is installed and authenticated, and labels OpenCode 2.x as experimental.
-If OpenCode is missing and npm is available, it can offer to install OpenCode for you.
-
-You can also use `/opencode:setup` to manage the optional review gate.
-
-#### Enabling review gate
-
-```bash
-/opencode:setup --enable-review-gate
-/opencode:setup --disable-review-gate
-```
-
-When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted OpenCode review based on Claude's response. If that review finds issues, the stop is blocked so Claude can address them first. The gate also blocks stopping when the OpenCode reviewer is unavailable; restore OpenCode and rerun `/opencode:setup`, or disable the gate with `/opencode:setup --disable-review-gate`.
-
-> [!WARNING]
-> The review gate can create a long-running Claude/OpenCode loop and may drain usage limits quickly. Only enable it when you plan to actively monitor the session.
+Checks that OpenCode is installed, that its version is one the plugin knows, and that at least one provider is logged in. If OpenCode is missing and npm is available, it offers to install it.
 
 ## Typical Flows
 
@@ -297,77 +212,48 @@ Then check in with:
 /opencode:result
 ```
 
-A background job has no time limit: it runs until OpenCode finishes, you cancel it with `/opencode:cancel`, or the Claude session ends. Long agentic tasks are normal, so the plugin never stops one on a timer or reports one as failed while it is still running.
+A foreground run is limited to ten minutes by Claude Code's shell tool, so use `--background` for anything longer. On OpenCode 1.x, a run ends when the Claude Code session that started it ends.
 
-## OpenCode Integration
+## What it runs
 
-The OpenCode plugin wraps a local `opencode serve` process. It uses the global `opencode` binary installed in your environment and OpenCode's normal provider/configuration state.
+Every `opencode` command line the plugin uses is listed in [`plugins/opencode/skills/opencode-cli/SKILL.md`](plugins/opencode/skills/opencode-cli/SKILL.md). In short: `opencode --version`, `opencode auth list`, `opencode run` with the prompt on standard input, `opencode session list`, and on OpenCode 2.x `opencode api` to read or interrupt a session and `opencode session export` (`opencode export` on 1.x).
 
-### Common Configurations
+- **Reviews** run OpenCode's `plan` agent, whose edit tools are denied and which is told to change nothing. That makes a review read-only by instruction, not by force: the agent can still run shell commands. After each review the plugin compares `git status` and the diff size with what they were before, and tells you if anything changed.
+- **Tasks** run its `build` agent, which can edit files in the project, unless you ask for read-only.
+- **Each run shows Claude Code's permission prompt.** To stop the prompt for reviews and read-only runs, add `Bash(opencode run --agent plan *)` to `permissions.allow` in your Claude Code settings. Weigh that against the first point: with the rule in place, the prompt no longer stands between a review and your shell. The rule also allows any further flags on that line; the plugin never adds `--auto`.
 
-If you want to change the default model used by the plugin, configure it in OpenCode. You can also pass a provider/model pair explicitly:
+If OpenCode rejects an option or a command, the plugin's commands show you its output and stop. They do not try other flags.
 
-```bash
-/opencode:rescue --model deepseek/deepseek-flash --effort high investigate the flaky integration test
-```
+### Continuing The Work In OpenCode
 
-`--effort` is forwarded to OpenCode as the provider-specific message `variant`.
-
-### Moving The Work Over To OpenCode
-
-Delegated tasks and any [stop gate](#what-does-the-review-gate-do) run can also be directly resumed inside OpenCode by running `opencode --session <session-id>` with the specific session ID you received from `/opencode:result` or `/opencode:status`, or by selecting it from the list.
-
-This way you can review the OpenCode work or continue the work there.
-
-### OpenCode 2.x
-
-OpenCode 2.x support is experimental. All the plugin's commands support 2.x, with these differences:
-
-- **Logins.** 2.x keeps its own logins, separate from OpenCode 1.x and the desktop app. If a provider that works elsewhere rejects requests, log in again with `opencode auth login <provider>`. `/opencode:setup` lists the stored 2.x logins.
-- **Reviews.** 2.x has no structured-output mode, so the plugin puts the review's JSON schema in the prompt and reads the JSON from OpenCode's reply. If the reply isn't valid, the plugin asks once more in the same session.
-- **Questions.** When OpenCode stops a task to ask a question, the plugin hands the question back to Claude, which answers by resuming the task.
-- **`--effort`** needs `--model` as well, since 2.x sets the effort on a specific model.
+Every run is an ordinary OpenCode session. Open one in OpenCode with `opencode --session <session-id>`, using the ID that `/opencode:result` or `/opencode:status` shows, or pick it from OpenCode's session list.
 
 ## FAQ
 
 ### Which model does the plugin use?
 
-Your OpenCode default: the `model` setting in your OpenCode config (`opencode.json`), or OpenCode's own choice when you haven't set one. Pass `--model provider/model` to pick one for a single command.
-
-### Does every model work for reviews?
-
-Reviews need the model to return the review as JSON. On OpenCode 1.x, the plugin first asks for structured output, which OpenCode implements by forcing a tool call. Some models refuse forced tool calls: DeepSeek's thinking mode answers "Thinking mode does not support this tool_choice". When that happens, the plugin asks for the JSON in the reply text instead, the way it always does on 2.x, so the review still works. If a model can't produce valid JSON even then, the review shows its raw reply.
+Your OpenCode default: the `model` setting in your OpenCode config (`opencode.json`), or OpenCode's own choice when you haven't set one. Pass `--model provider/model` to `/opencode:rescue` to pick one for a single task.
 
 ### Do I need a separate OpenCode account for this plugin?
 
-If you are already signed into OpenCode on this machine, that account should work immediately here too. This plugin uses your local OpenCode CLI authentication. OpenCode 2.x keeps its logins separately from 1.x: see [OpenCode 2.x](#opencode-2x).
-
-If you only use Claude Code today and have not used OpenCode yet, configure an OpenCode provider first. Run `/opencode:setup` to check whether OpenCode is ready.
-
-### Does the plugin use a separate OpenCode runtime?
-
-No. This plugin delegates through your local OpenCode CLI and a headless `opencode serve` process on the same machine.
-
-That means:
-
-- it uses the same OpenCode install you would use directly
-- it uses the same local authentication state
-- it uses the same repository checkout and machine-local environment
+No. The plugin runs your local OpenCode CLI, so the logins it already has are the ones used. OpenCode 2.x keeps its logins separately from 1.x and from the desktop app: if a provider that works elsewhere rejects requests, log in again with `opencode auth login <provider>`.
 
 ### Will it use the same OpenCode config I already have?
 
-Yes. If you already use OpenCode, the plugin picks up the same [configuration](#common-configurations).
+Yes. It is the same OpenCode install, the same configuration and the same repository checkout you would use directly.
 
-### Can I keep using my current API key or base URL setup?
+### Does it work in claude.ai chat or Cowork?
 
-Yes. Because the plugin uses your local OpenCode CLI, your existing sign-in method and config still apply.
+No. Those have no access to the OpenCode on your computer. The commands say so and stop.
 
-If you need to point a provider at a different endpoint, configure that in OpenCode and rerun `/opencode:setup`.
+## Development
+
+`npm test` checks the plugin's Markdown against the plugin directory's rules for community plugins and against [`tests/opencode-cli-contract.json`](tests/opencode-cli-contract.json), the list of every `opencode` command line the plugin uses. `npm run canary` compares that list with the `opencode` installed on your machine; a weekly workflow does the same for the npm and Homebrew builds.
 
 ## Privacy
 
-The plugin runs entirely locally and collects nothing. Your prompts and code go only to the AI providers you configured in your own OpenCode install. See [PRIVACY.md](PRIVACY.md) for details.
+The plugin collects nothing. Your prompts and code go only to the AI providers you configured in your own OpenCode install. See [PRIVACY.md](PRIVACY.md).
 
 ## Acknowledgements and provenance
 
-This project began as a conversion of OpenAI's [codex-plugin-cc](https://github.com/openai/codex-plugin-cc) (Apache-2.0) — the Codex companion plugin for Claude Code — into an OpenCode companion. The plugin surface (commands, background jobs, session transfer) descends from that work; the OpenCode server integration, security model, and test contract were built for this project. The complete pre-conversion history is preserved in this repository; the fork point is tagged [`codex-fork-point`](../../releases/tag/codex-fork-point). See [NOTICE](NOTICE) for license attribution and [docs/history/](docs/history/) for the original conversion plan.
+This project began as a conversion of OpenAI's [codex-plugin-cc](https://github.com/openai/codex-plugin-cc) (Apache-2.0), the Codex companion plugin for Claude Code. The command set and the prompting guidance descend from that work. The pre-conversion history is preserved in this repository; the fork point is tagged [`codex-fork-point`](../../releases/tag/codex-fork-point). See [NOTICE](NOTICE) for license attribution.

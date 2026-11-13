@@ -2,7 +2,7 @@
 
 Use OpenCode from inside Claude Code to review code or hand a task to another model.
 
-This is the edition of the plugin that Anthropic's plugin directory lists. It holds instructions only: its commands tell Claude to run the `opencode` CLI you already have, and Claude Code asks you before each run. It ships no scripts and no hooks, and it downloads nothing unless you accept `/opencode:setup`'s offer to install OpenCode.
+The plugin holds instructions only: its commands tell Claude to run the `opencode` CLI you already have, and Claude Code asks you before each run. It ships no scripts and no hooks, and it downloads nothing unless you accept `/opencode:setup`'s offer to install OpenCode.
 
 It is an independent community project, not affiliated with or endorsed by the OpenCode project, Anthropic, or OpenAI.
 
@@ -41,7 +41,3 @@ Each run shows Claude Code's permission prompt. To stop the prompt for reviews a
 ## Data
 
 The plugin itself collects and sends nothing. OpenCode sends your prompts and the code it reads to the model provider you configured in OpenCode. See the [privacy note](https://github.com/TheRealDinghyDog/opencode-plugin-cc/blob/main/PRIVACY.md).
-
-## The full plugin
-
-The directory accepts only instruction files from community publishers, so this edition leaves out what needs code: the stop-time review gate, session transfer, and job tracking that survives outside Claude Code's background tasks. The full plugin has them and installs from its own marketplace. See [Editions](https://github.com/TheRealDinghyDog/opencode-plugin-cc#editions).

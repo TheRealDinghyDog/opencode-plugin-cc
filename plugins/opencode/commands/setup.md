@@ -9,7 +9,7 @@ This command works only in Claude Code running on the user's own computer, where
 Raw slash-command arguments:
 $ARGUMENTS
 
-If the arguments mention `--enable-review-gate` or `--disable-review-gate`: say that the stop-time review gate is part of the full plugin, not this edition, point to https://github.com/TheRealDinghyDog/opencode-plugin-cc#editions, and continue with the checks.
+If the arguments mention `--enable-review-gate` or `--disable-review-gate`: say that the stop-time review gate was removed in version 2.0.0 and no longer runs, and continue with the checks.
 
 ## Rules for every OpenCode call
 

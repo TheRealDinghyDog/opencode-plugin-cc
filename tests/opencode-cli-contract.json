@@ -1,5 +1,5 @@
 {
-  "description": "Every opencode command line the directory edition (plugins/opencode) tells Claude to run. tests/directory-edition.test.mjs checks the edition's Markdown against this file, and the canary checks this file against the real CLI's --help on each channel.",
+  "description": "Every opencode command line the plugin (plugins/opencode) tells Claude to run. tests/plugin-instructions.test.mjs checks the plugin's Markdown against this file, and the canary checks this file against the real CLI's --help on each channel.",
   "commands": {
     "opencode": {
       "majors": [1, 2],

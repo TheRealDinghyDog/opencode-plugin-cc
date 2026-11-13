@@ -4,8 +4,7 @@
   "author": "TheRealDinghyDog",
   "private": true,
   "files": [
-    "plugins/opencode/",
-    "plugins/opencode-full/"
+    "plugins/opencode/"
   ],
   "type": "module",
   "description": "Use OpenCode from Claude Code to review code or delegate tasks.",
@@ -16,7 +15,6 @@
   "scripts": {
     "bump-version": "node scripts/bump-version.mjs",
     "canary": "node scripts/opencode-canary.mjs",
-    "check-allowed-tools": "node scripts/check-allowed-tools.mjs",
     "check-directory-policy": "node scripts/check-directory-policy.mjs",
     "check-version": "node scripts/bump-version.mjs --check",
     "test": "node --test tests/*.test.mjs"

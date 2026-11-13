@@ -17,12 +17,11 @@ import {
 import { makeTempDir } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const EDITION = path.join(ROOT, "plugins", "opencode");
-const FULL = path.join(ROOT, "plugins", "opencode-full");
+const PLUGIN = path.join(ROOT, "plugins", "opencode");
 const COMMANDS = ["adversarial-review", "cancel", "rescue", "result", "review", "setup", "status"];
 
 function read(relativePath) {
-  return fs.readFileSync(path.join(EDITION, relativePath), "utf8");
+  return fs.readFileSync(path.join(PLUGIN, relativePath), "utf8");
 }
 
 function codes(findings) {
@@ -46,11 +45,11 @@ function makePlugin(extraFiles = {}) {
   return root;
 }
 
-test("the directory edition meets the directory's community-plugin rules", () => {
-  assert.deepEqual(checkDirectoryPolicy(EDITION), []);
+test("the plugin meets the directory's community-plugin rules", () => {
+  assert.deepEqual(checkDirectoryPolicy(PLUGIN), []);
 });
 
-test("the directory edition holds only instruction files", () => {
+test("the plugin holds only instruction files", () => {
   const extensions = new Set();
   const visit = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -61,16 +60,23 @@ test("the directory edition holds only instruction files", () => {
       }
     }
   };
-  visit(EDITION);
+  visit(PLUGIN);
   assert.deepEqual([...extensions].sort(), [".json", ".md", "LICENSE", "NOTICE"]);
   for (const gone of ["scripts", "hooks", "agents", "schemas", "prompts", "bin"]) {
-    assert.equal(fs.existsSync(path.join(EDITION, gone)), false, `${gone}/ should not exist`);
+    assert.equal(fs.existsSync(path.join(PLUGIN, gone)), false, `${gone}/ should not exist`);
   }
 });
 
-test("the policy check reports the five findings the portal gave the full plugin", () => {
-  // The portal refused v1.1.1 (the full plugin) with exactly these five.
-  const found = codes(checkDirectoryPolicy(FULL)).filter((code) => code.startsWith("LOCAL_CODE_"));
+test("the policy check reports the five findings the portal gave v1.1.1", () => {
+  // The portal refused v1.1.1, which shipped code, with exactly these five.
+  // This rebuilds one example of each in a scratch plugin.
+  const root = makePlugin({
+    "hooks/hooks.json": '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"node run.mjs"}]}]}}\n',
+    "scripts/run.mjs": "console.log(1);\n",
+    "commands/status.md": '---\ndescription: x\nallowed-tools: Bash(node:*)\n---\n\n!`node run.mjs status`\n',
+    "agents/helper.md": "---\nname: helper\ndescription: x\nskills:\n  - one\n---\n"
+  });
+  const found = codes(checkDirectoryPolicy(root)).filter((code) => code.startsWith("LOCAL_CODE_"));
   assert.deepEqual(found, [
     "LOCAL_CODE_FILE_TYPE",
     "LOCAL_CODE_FRONTMATTER_KEY",
@@ -136,8 +142,8 @@ test("frontmatter is read as plain key: value lines", () => {
   assert.match(readFrontmatter("---\nname: a\n").problem, /no closing/);
 });
 
-test("every frontmatter key in the edition was accepted by a portal validation", () => {
-  const files = [...COMMANDS.map((name) => `commands/${name}.md`), ...fs.readdirSync(path.join(EDITION, "skills")).map((name) => `skills/${name}/SKILL.md`)];
+test("every frontmatter key in the plugin was accepted by a portal validation", () => {
+  const files = [...COMMANDS.map((name) => `commands/${name}.md`), ...fs.readdirSync(path.join(PLUGIN, "skills")).map((name) => `skills/${name}/SKILL.md`)];
   for (const file of files) {
     const frontmatter = readFrontmatter(read(file));
     assert.ok(frontmatter, `${file} has frontmatter`);
@@ -150,8 +156,8 @@ test("every frontmatter key in the edition was accepted by a portal validation",
   }
 });
 
-test("the edition has exactly the commands it documents", () => {
-  const present = fs.readdirSync(path.join(EDITION, "commands")).map((name) => name.replace(/\.md$/, "")).sort();
+test("the plugin has exactly the commands it documents", () => {
+  const present = fs.readdirSync(path.join(PLUGIN, "commands")).map((name) => name.replace(/\.md$/, "")).sort();
   assert.deepEqual(present, COMMANDS);
   const readme = read("README.md");
   for (const name of COMMANDS) {
@@ -163,7 +169,7 @@ test("commands that only read or cancel cannot be started by the model", () => {
   for (const name of ["review", "adversarial-review", "status", "result", "cancel"]) {
     assert.match(read(`commands/${name}.md`), /^disable-model-invocation: true$/m, name);
   }
-  // rescue and setup stay available to the model, as in the full plugin.
+  // rescue and setup stay available to the model.
   for (const name of ["rescue", "setup"]) {
     assert.doesNotMatch(read(`commands/${name}.md`), /^disable-model-invocation:/m, name);
   }
@@ -257,8 +263,8 @@ test("rescue never continues a review session and keeps the earlier agent", () =
   assert.match(rescue, /Skip a session whose background task in this conversation is still running/);
 });
 
-test("every opencode command line in the edition is in the CLI contract", () => {
-  assert.deepEqual(checkCliContract(EDITION), []);
+test("every opencode command line in the plugin is in the CLI contract", () => {
+  assert.deepEqual(checkCliContract(PLUGIN), []);
 });
 
 test("the CLI contract check catches an unlisted command, flag or operation", () => {
@@ -304,7 +310,7 @@ test("command lines are parsed into a contract command and its flags", () => {
   assert.equal(parseInvocation("opencode --version", contract).command, "opencode");
 });
 
-test("each contract command is used by the edition, so the contract has no dead entries", () => {
+test("each contract command is used by the plugin, so the contract has no dead entries", () => {
   const contract = loadCliContract();
   const used = new Set();
   const usedFlags = new Set();
@@ -327,7 +333,7 @@ test("each contract command is used by the edition, so the contract has no dead 
       }
     }
   };
-  visit(EDITION);
+  visit(PLUGIN);
   for (const [command, entry] of Object.entries(contract.commands)) {
     assert.ok(used.has(command), `${command} is in the contract but not used`);
     for (const flag of Object.keys(entry.flags)) {
@@ -337,12 +343,4 @@ test("each contract command is used by the edition, so the contract has no dead 
       assert.ok(used.has(`opencode api ${operation}`), `${operation} is in the contract but not used`);
     }
   }
-});
-
-test("both editions carry the same version", () => {
-  const edition = JSON.parse(read(".claude-plugin/plugin.json"));
-  const full = JSON.parse(fs.readFileSync(path.join(FULL, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(edition.name, "opencode");
-  assert.equal(full.name, "opencode");
-  assert.equal(edition.version, full.version);
 });
