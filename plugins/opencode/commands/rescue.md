@@ -7,7 +7,7 @@ Hand a task to OpenCode by calling the user's own `opencode` CLI, and return wha
 
 Use this when the user asks for OpenCode, or when you are stuck and want a second implementation or diagnosis pass on a substantial task. Do not use it for a small ask you can finish quickly yourself.
 
-This command needs Claude Code on a machine where OpenCode is installed. If you have no shell tool here, say so and stop.
+This command works only in Claude Code running on the user's own computer, where their OpenCode is installed. In claude.ai chat, the Claude apps or Cowork, any shell you have is a sandbox that does not hold the user's OpenCode or their logins: say that this plugin needs Claude Code, and stop. Do not run or install anything there.
 
 Raw user request:
 $ARGUMENTS

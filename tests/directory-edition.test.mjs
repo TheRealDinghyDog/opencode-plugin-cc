@@ -195,6 +195,20 @@ test("every opencode run names its agent first, and never auto-approves", () => 
   }
 });
 
+test("every command stops outside Claude Code on the user's own computer", () => {
+  // Chat and Cowork load these commands too and have a sandboxed shell, so
+  // "no shell tool" is not the right test, and setup must not install there.
+  const guard =
+    "This command works only in Claude Code running on the user's own computer, where their OpenCode is installed. In claude.ai chat, the Claude apps or Cowork, any shell you have is a sandbox that does not hold the user's OpenCode or their logins: say that this plugin needs Claude Code, and stop. Do not run or install anything there.";
+  for (const name of COMMANDS) {
+    const source = read(`commands/${name}.md`);
+    assert.ok(source.includes(guard), name);
+    // The guard comes before the first command line the file tells Claude to run.
+    const firstFence = source.indexOf("```bash");
+    assert.ok(firstFence === -1 || source.indexOf(guard) < firstFence, `${name}: guard comes first`);
+  }
+});
+
 test("every command carries the stop rule for an unsupported CLI", () => {
   const rule =
     "- Use only the `opencode` invocations written in this file. If one fails with an unknown option or an unknown command, or prints OpenCode's help text instead of doing what was asked, stop: show the user the exact output and the output of `opencode --version`, and say the plugin may not support that OpenCode version yet. Do not try other flags or subcommands.";

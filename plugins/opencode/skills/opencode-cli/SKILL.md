@@ -10,6 +10,7 @@ This plugin has no code of its own. Its commands tell Claude to run the user's `
 
 ## Rules
 
+- Run OpenCode only from Claude Code on the user's own computer. In claude.ai chat, the Claude apps or Cowork, a shell is a sandbox without the user's OpenCode or logins: say the plugin needs Claude Code, and stop.
 - Use only the invocations in the table. If one fails with an unknown option or an unknown command, or prints OpenCode's help text instead of doing what was asked, stop and show the user the exact output and the output of `opencode --version`. Do not try other flags or subcommands: a guess can start a run the user did not ask for.
 - Never add `--auto`. Without it, a non-interactive run rejects every permission request OpenCode would otherwise ask about, such as reading `.env` or touching files outside the project.
 - Send the prompt on standard input, with a quoted here-document, so the shell expands nothing in it.
