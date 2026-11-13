@@ -1,0 +1,57 @@
+---
+description: Show the final answer of a finished OpenCode run started from Claude Code in this repository
+argument-hint: '[session-id]'
+disable-model-invocation: true
+---
+
+Show what an OpenCode run this plugin started answered.
+
+This command needs Claude Code on a machine where OpenCode is installed. If you have no shell tool here, say so and stop.
+
+Raw slash-command arguments:
+`$ARGUMENTS`
+
+## Rules for every OpenCode call
+
+- Use only the `opencode` invocations written in this file. If one fails with an unknown option or an unknown command, or prints OpenCode's help text instead of doing what was asked, stop: show the user the exact output and the output of `opencode --version`, and say the plugin may not support that OpenCode version yet. Do not try other flags or subcommands.
+- This command only reads. Do not start, continue, stop or delete anything.
+- If `opencode` is not installed, stop and tell the user to run `/opencode:setup`.
+
+## Find the run
+
+- With a session ID in the arguments, use that session.
+- Without one, use the most recent `opencode run` you started in this conversation. If there is none, list OpenCode's sessions and take the newest whose title starts with `Claude Code`:
+
+```bash
+opencode session list -n 10
+```
+
+- If nothing matches, say so and stop.
+
+## Get the answer
+
+- If the run is a background task of this conversation and it has finished, read its output with the tool Claude Code gives you for background task output. The answer is the text after the last progress line (a line that starts with `>`, `$`, `→`, `←`, `✱`, `✗`, or an exclamation mark for a permission notice).
+- If it is still running, say so, show its last few progress lines, and stop.
+- Otherwise export the session. Find the major version with `opencode --version`, then run the one that matches, exactly as written, without redirecting its output to a file.
+
+  2.x:
+
+```bash
+opencode session export <session id>
+```
+
+  1.x:
+
+```bash
+opencode export <session id>
+```
+
+- The export is JSON with a `messages` list. The answer is the text of the last assistant message: on 2.x a message with `type` `assistant` and its `content` items of type `text`; on 1.x a message whose `info.role` is `assistant` and its `parts` of type `text`. On 2.x the top-level `info.outcome` says how the run ended.
+- The export can be long. If the output was cut off, read the end of the saved output instead of running the export again. Never print the raw JSON to the user.
+
+## Present
+
+- Return the answer verbatim, with the session ID and how the run ended. Do not paraphrase or summarize it.
+- If the run was a review, do not fix anything it mentions. Ask the user which findings, if any, they want fixed.
+- If the run was interrupted or failed before it answered, say that and show the last text OpenCode produced, marked as incomplete.
+- Mention that the session can be opened in OpenCode itself with `opencode --session <session id>`.
